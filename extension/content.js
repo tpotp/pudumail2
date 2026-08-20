@@ -333,17 +333,13 @@ async function scrollAndPaginate(maxPages = 50) {
   for (let i = 0; i < maxPages; i++) {
     const prevSize = attachmentCache.size;
 
-    // Busca el botón de siguiente página con MÚLTIPLES selectores (en/es/pt)
+    // Obtener los botones de paginación
     const nextBtn = document.querySelector(
-      'div[aria-label="Resultados siguientes"], ' +
-      'div[aria-label="Older"], ' +
-      'div[aria-label="Más antiguos"], ' +
-      'div[aria-label="Suivant"], ' +
-      '.T-I-Js-Gs:not([aria-disabled="true"])'
+      'div[aria-label="Resultados siguientes"], div[aria-label="Older"], div[aria-label="Más antiguos"], div[aria-label="Suivant"], .T-I-Js-Gs:not([aria-disabled="true"]):last-child'
     );
 
     if (!nextBtn) {
-      console.log(`[Pudú v3] 🏁 No se encontró botón de siguiente página en página ${page}. Fin de la paginación.`);
+      console.log(`[Pudú v3] 🏁 No se encontró botón de siguiente página. Fin.`);
       break;
     }
 
@@ -352,37 +348,56 @@ async function scrollAndPaginate(maxPages = 50) {
                        nextBtn.getAttribute('disabled') !== null;
 
     if (isDisabled) {
-      console.log(`[Pudú v3] 🏁 Botón siguiente deshabilitado en página ${page}. Fin de la paginación.`);
+      console.log(`[Pudú v3] 🏁 Botón siguiente deshabilitado. Fin de la paginación.`);
       break;
     }
 
-    // Guarda referencia de la primera fila para detectar cuando cambie la página
+    // Guarda estado actual para saber si cambió
     const firstRow = document.querySelector('tr.zA');
     const firstRowId = firstRow ? firstRow.getAttribute('id') : '';
-    const firstRowText = firstRow ? firstRow.innerText : '';
+    
+    // Obtener el texto de paginación actual (ej. "1-50 de 100")
+    const pagSpan = document.querySelector('.ts');
+    const pagText = pagSpan ? pagSpan.innerText : '';
 
     page++;
-    console.log(`[Pudú v3] ➡️ Avanzando a página ${page}… (clic en "${nextBtn.getAttribute('aria-label')}")`);
+    console.log(`[Pudú v3] ➡️ Avanzando a página ${page}… (Texto actual: ${pagText})`);
     reportProgress(page, `Cargando página ${page}...`);
-    nextBtn.click();
+    
+    // Función auxiliar para intentar avanzar
+    let pageChanged = false;
+    let attempts = 0;
 
-    // Espera a que Gmail cargue la nueva página comprobando que la primera fila cambie
-    let waited = 0;
-    while (waited < 8000) {
-      await sleep(300);
-      waited += 300;
-      const currentFirstRow = document.querySelector('tr.zA');
-      if (currentFirstRow) {
-        const currentId = currentFirstRow.getAttribute('id');
-        const currentText = currentFirstRow.innerText;
-        if (currentId !== firstRowId || currentText !== firstRowText) {
-          console.log(`[Pudú v3] ✅ Nueva página detectada en ${waited}ms`);
-          break; // La página cambió
+    while (attempts < 3 && !pageChanged) {
+      attempts++;
+      console.log(`[Pudú v3] 🖱️ Clic en Siguiente (Intento ${attempts})`);
+      nextBtn.click();
+
+      // Espera activa hasta 6 segundos por intento
+      let waited = 0;
+      while (waited < 6000) {
+        await sleep(300);
+        waited += 300;
+        
+        const currentFirstRow = document.querySelector('tr.zA');
+        const currentId = currentFirstRow ? currentFirstRow.getAttribute('id') : '';
+        const currentPagSpan = document.querySelector('.ts');
+        const currentPagText = currentPagSpan ? currentPagSpan.innerText : '';
+
+        if ((currentId && currentId !== firstRowId) || (currentPagText && currentPagText !== pagText)) {
+          console.log(`[Pudú v3] ✅ Nueva página detectada (Cambió ID o Texto de paginación)`);
+          pageChanged = true;
+          break;
         }
       }
     }
-    await sleep(800); // margen extra para renderizado de chips e imágenes
 
+    if (!pageChanged) {
+      console.log(`[Pudú v3] ⚠️ La página no cambió después de 3 intentos. Forzando fin.`);
+      break;
+    }
+
+    await sleep(800); // margen extra para renderizado de chips e imágenes
     fullScan();
     console.log(`[Pudú v3] 📊 Página ${page}: ${attachmentCache.size - prevSize} nuevos, total: ${attachmentCache.size}`);
     reportProgress(page, `Página ${page} escaneada — ${attachmentCache.size} adjuntos en total`);
