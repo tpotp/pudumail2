@@ -458,15 +458,31 @@ function findNextButton() {
   return { element: null, disabled: true };
 }
 
-// ── Paginación Ultra-Resiliente ───────────────────────────────────────
-async function scrollAndPaginate(maxPages = 50) {
+
+
+function firstRowSignature() {
+  const row = document.querySelector('tr.zA, [role="main"] [role="row"]');
+  return row ? (row.getAttribute('id') || row.getAttribute('data-legacy-thread-id') || row.innerText.slice(0, 80)) : '';
+}
+
+async function scrollAndPaginate(query = 'has:attachment', maxPages = 50) {
   console.log('%c[Pudú v4] 📜 Iniciando escaneo paginado resiliente…', 'color:#a855f7;font-weight:bold');
+  attachmentCache.clear();
 
   // Asegurar vista de búsqueda
-  if (!window.location.href.includes('#search')) {
+  if (!window.location.hash.includes('#search/has%3Aattachment')) {
     window.location.hash = '#search/has%3Aattachment';
-    await sleep(2000);
+    await sleep(1500);
   }
+
+  const rowsLoaded = await (async () => {
+    for (let attempt = 0; attempt < 60; attempt++) {
+      if (document.querySelector('tr.zA, [role="main"] [role="row"]')) return true;
+      await sleep(250);
+    }
+    return false;
+  })();
+  if (!rowsLoaded) throw new Error('Gmail sigue cargando; revisa tu conexión a internet.');
 
   let currentPage = 1;
   fullScan();
@@ -504,7 +520,10 @@ async function scrollAndPaginate(maxPages = 50) {
     }
 
     // ESTRATEGIA 2: Hash Router de Gmail si el botón falló
-    if (!navigated) {
+    if (!navigated && (!nextBtnInfo.element || nextBtnInfo.disabled)) {
+      console.log(`[Pudú v4] 🏁 Fin de resultados (botón deshabilitado/inexistente).`);
+      break;
+    } else if (!navigated) {
       console.log(`[Pudú v4] 🌐 Método 2: Hash router (#search/has:attachment/p${p})`);
       window.location.hash = `#search/has%3Aattachment/p${p}`;
       
@@ -520,103 +539,42 @@ async function scrollAndPaginate(maxPages = 50) {
       }
     }
 
-    // ESTRATEGIA 3: Scroll suave en la lista para forzar render
-    window.scrollBy(0, 500);
-    await sleep(400);
+    // Escanear la nueva página si navegamos exitosamente
+    if (navigated) {
+      // ESTRATEGIA 3: Scroll suave en la lista para forzar render visual
+      window.scrollBy(0, 500);
+      await sleep(400);
 
-    // Escanear la nueva página
-    fullScan();
-    const newItemsFound = attachmentCache.size - prevCount;
-    currentPage = p;
+      fullScan();
+      const newItemsFound = attachmentCache.size - prevCount;
+      currentPage = p;
 
-    console.log(`[Pudú v4] 📊 Página ${p}: +${newItemsFound} nuevos | Total acumulado: ${attachmentCache.size}`);
-    reportProgress(p, `Página ${p} escaneada — ${attachmentCache.size} adjuntos en total`);
+      console.log(`[Pudú v4] 📊 Página ${p}: +${newItemsFound} nuevos | Total acumulado: ${attachmentCache.size}`);
+      reportProgress(p, `Página ${p} analizada — ${attachmentCache.size} adjuntos`);
 
-    if (newItemsFound === 0 && !navigated) {
-      consecutiveEmptyPages++;
-      if (consecutiveEmptyPages >= 2) {
-        console.log(`[Pudú v4] 🏁 Fin de resultados alcanzado (sin nuevos datos tras 2 intentos).`);
-        break;
+      if (newItemsFound === 0) {
+        consecutiveEmptyPages++;
+        if (consecutiveEmptyPages >= 2) {
+          console.log(`[Pudú v4] 🏁 Fin de resultados alcanzado (sin nuevos datos tras 2 páginas).`);
+          break;
+        }
+      } else {
+        consecutiveEmptyPages = 0;
       }
     } else {
-      consecutiveEmptyPages = 0;
+      console.log(`[Pudú v4] ⚠️ No se pudo navegar a la página ${p}. Fin del escaneo.`);
+      break;
     }
   }
 
-  reportProgress(currentPage, `✅ Escaneo completado: ${attachmentCache.size} adjuntos encontrados`);
+  reportProgress(currentPage, `Escaneo completado: ${attachmentCache.size} adjuntos encontrados`);
   console.log(`%c[Pudú v4] 🎉 Fin del escaneo. Total: ${attachmentCache.size} adjuntos`, 'color:#10b981;font-weight:bold');
-}
-
-function firstRowSignature() {
-  const row = document.querySelector('tr.zA, [role="main"] [role="row"]');
-  return row ? (row.getAttribute('id') || row.getAttribute('data-legacy-thread-id') || row.innerText.slice(0, 80)) : '';
-}
-
-async function advanceSearchPage(page) {
-  const before = firstRowSignature();
-  const next = findNextButton();
-  if (!next.element || next.disabled) return false;
-  robustClick(next.element);
-
-  for (let attempt = 0; attempt < 24; attempt++) {
-    await sleep(250);
-    const after = firstRowSignature();
-    if (after && after !== before) return true;
-  }
-
-  // Gmail's hash router is a secondary fallback when an interface update swallows the click.
-  window.location.hash = `#search/has%3Aattachment/p${page}`;
-  for (let attempt = 0; attempt < 24; attempt++) {
-    await sleep(250);
-    const after = firstRowSignature();
-    if (after && after !== before) return true;
-  }
-  return false;
-}
-
-async function scanOnePage(query, continuing) {
-  if (!continuing || !scanState || scanState.query !== query) {
-    attachmentCache.clear();
-    scanState = { query, page: 0, done: false };
-    if (window.location.hash !== '#search/has%3Aattachment') {
-      window.location.hash = '#search/has%3Aattachment';
-      await sleep(800);
-    }
-  }
-
-  const rowsLoaded = await (async () => {
-    for (let attempt = 0; attempt < 120; attempt++) {
-      if (document.querySelector('tr.zA, [role="main"] [role="row"]')) return true;
-      await sleep(400);
-    }
-    return false;
-  })();
-  if (!rowsLoaded) throw new Error('Gmail sigue cargando; el conector reintentará automáticamente.');
-
-  if (scanState.page === 0) {
-    scanState.page = 1;
-  } else if (await advanceSearchPage(scanState.page + 1)) {
-    scanState.page++;
-  } else {
-    scanState.done = true;
-  }
-
-  if (!scanState.done) {
-    fullScan();
-    // Use the next button to determine if we are done, but also check if we found anything new.
-    const next = findNextButton();
-    scanState.done = !next.element || next.disabled;
-  }
-
-  reportProgress(scanState.page, scanState.done
-    ? `Escaneo completado: ${attachmentCache.size} adjuntos encontrados`
-    : `Página ${scanState.page} analizada — ${attachmentCache.size} adjuntos`);
-
+  
   return {
-    done: scanState.done,
-    page: scanState.page,
+    done: true,
+    page: currentPage,
     count: attachmentCache.size,
-    attachments: scanState.done ? Array.from(attachmentCache.values()) : undefined,
+    attachments: Array.from(attachmentCache.values())
   };
 }
 
@@ -630,7 +588,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'EXTRACT_ATTACHMENTS') {
     console.log('%c[Pudú v4] 📩 EXTRACT_ATTACHMENTS recibido', 'color:#f59e0b;font-weight:bold');
 
-    scanOnePage(request.query || 'has:attachment', Boolean(request.continue))
+    scrollAndPaginate(request.query || 'has:attachment')
       .then(result => sendResponse({ success: true, ...result }))
       .catch(error => sendResponse({ success: false, error: error.message }));
 
