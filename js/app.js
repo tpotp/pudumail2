@@ -541,10 +541,7 @@ class PuduApp {
     this.renderAttachments();
   }
 
-  /**
-   * MOVE TO DISK (Modern Native File System Access API)
-   * Allows saving all selected attachments directly into a user-chosen folder on their PC!
-   */
+  /** Save through Chrome's native download manager so every file is verifiable. */
   async handleMoveToDisk() {
     const itemsToSave = this.selectedIds.size > 0
       ? this.attachments.filter(a => this.selectedIds.has(a.id))
@@ -555,51 +552,10 @@ class PuduApp {
       return;
     }
 
-    if ('showDirectoryPicker' in window) {
-      try {
-        const dirHandle = await window.showDirectoryPicker();
-        this.showLoading(true, `Guardando ${itemsToSave.length} archivos en tu carpeta...`);
-
-        let savedCount = 0;
-        const savedItems = [];
-        for (const item of itemsToSave) {
-          try {
-            const attachment = await window.PuduBridge.resolveAttachment(item);
-            Object.assign(item, attachment);
-            const response = await fetch(attachment.downloadUrl, { credentials: 'omit' });
-            if (!response.ok) throw new Error(`Gmail devolvió ${response.status}`);
-            const fileHandle = await dirHandle.getFileHandle(this.safeFilename(item.filename), { create: true });
-            const writable = await fileHandle.createWritable();
-            await writable.write(await response.blob());
-            await writable.close();
-            savedCount++;
-            savedItems.push(item);
-            if (this.progressBar) {
-              this.progressBar.style.width = `${Math.round((savedCount / itemsToSave.length) * 100)}%`;
-            }
-          } catch (err) {
-            console.warn('Error guardando archivo:', item.filename, err);
-          }
-        }
-
-        if (savedItems.length) await this.maybeTrashSavedConversations(savedItems);
-        this.showLoading(false);
-        alert(savedCount ? `🎉 Se guardaron ${savedCount} archivos reales en tu carpeta.` : 'Gmail no permitió guardar los archivos seleccionados.');
-      } catch (err) {
-        if (err.name !== 'AbortError') {
-          console.error('Error con DirectoryPicker:', err);
-          await this.downloadWithExtension(itemsToSave);
-        }
-        this.showLoading(false);
-      }
-    } else {
-      await this.downloadWithExtension(itemsToSave);
-    }
+    await this.downloadWithExtension(itemsToSave);
   }
 
-  /**
-   * ZIP Download Fallback using JSZip
-   */
+  /** Native batch download preserves per-file verification. */
   async handleDownloadZip() {
     const itemsToSave = this.selectedIds.size > 0
       ? this.attachments.filter(a => this.selectedIds.has(a.id))
@@ -610,46 +566,18 @@ class PuduApp {
       return;
     }
 
-    if (typeof JSZip === 'undefined') {
-      alert('Librería JSZip cargando, por favor intenta de nuevo.');
-      return;
-    }
-
-    this.showLoading(true, 'Preparando adjuntos reales para ZIP...');
-    const zip = new JSZip();
-
-    try {
-      for (const item of itemsToSave) {
-        const attachment = await window.PuduBridge.resolveAttachment(item);
-        Object.assign(item, attachment);
-        const resp = await fetch(attachment.downloadUrl, { credentials: 'omit' });
-        if (!resp.ok) throw new Error(`Gmail devolvió ${resp.status}`);
-        zip.file(this.safeFilename(item.filename), await resp.blob());
-      }
-
-      const content = await zip.generateAsync({ type: 'blob' });
-      const url = URL.createObjectURL(content);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `PuduMail_Adjuntos_${new Date().toISOString().slice(0, 10)}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('No se pudo crear el ZIP:', error);
-      await this.downloadWithExtension(itemsToSave);
-    } finally {
-      this.showLoading(false);
-    }
+    await this.downloadWithExtension(itemsToSave);
   }
 
   async downloadWithExtension(items) {
     this.showLoading(true, 'Guardando adjuntos reales en Descargas/PuduMail_Adjuntos...');
     try {
       const result = await window.PuduBridge.downloadAttachments(items);
-      if (result.attachments?.length) await this.maybeTrashSavedConversations(result.attachments);
-      alert(result.downloaded ? `Se enviaron ${result.downloaded} archivos reales a Descargas/PuduMail_Adjuntos.` : 'No se pudo descargar ningún archivo.');
+      if (result.cleanupItems?.length) await this.maybeTrashSavedConversations(result.cleanupItems);
+      const verified = result.verifications?.filter(item => item.exists).length || 0;
+      alert(result.downloaded
+        ? `Chrome confirmó ${verified} de ${result.downloaded} descarga(s) completada(s) en Descargas/PuduMail_Adjuntos.${result.errors?.length ? ` ${result.errors.length} archivo(s) fallaron y no se ofrecerán para limpieza.` : ''}`
+        : 'No se pudo descargar ningún archivo. Gmail no se modificó.');
     } catch (error) {
       alert(error.message || 'No se pudieron descargar los adjuntos.');
     } finally {
@@ -664,11 +592,29 @@ class PuduApp {
   async maybeTrashSavedConversations(items) {
     if (!this.trashAfterSave?.checked || !items.length) return;
     const conversations = new Set(items.map(item => item.threadUrl || item.threadId).filter(Boolean)).size;
-    if (!conversations || !confirm(`Los adjuntos ya se guardaron. ¿Enviar ${conversations} conversación(es) a la Papelera de Gmail?`)) return;
+    if (!conversations || !confirm(
+      `Respaldo verificado para ${items.length} archivo(s).\n\n` +
+      `RIESGO: Gmail moverá ${conversations} conversación(es) completas a la Papelera. Esto puede incluir mensajes o adjuntos no seleccionados. La Papelera sigue contando en tu cuota hasta vaciarla.\n\n` +
+      '¿Mover esas conversaciones a Papelera recuperable?'
+    )) return;
     try {
       const response = await window.PuduBridge.request('TRASH_CONVERSATIONS', { items });
       if (!response.success) throw new Error(response.error || 'No se pudieron enviar las conversaciones a la Papelera.');
       if (response.errors?.length) console.warn('Papelera parcial:', response.errors);
+      const trashedItems = response.trashedItems || [];
+      if (trashedItems.length && confirm(
+        `Se movieron ${response.trashed} conversación(es) a Papelera.\n\n` +
+        'ÚLTIMA ADVERTENCIA: eliminar permanentemente libera la cuota de Gmail, pero no se puede deshacer. Google puede tardar hasta 48–72 horas en actualizar el espacio.\n\n' +
+        '¿Eliminar permanentemente estas conversaciones ahora?'
+      )) {
+        const purge = await window.PuduBridge.request('PURGE_CONVERSATIONS', { items: trashedItems });
+        if (!purge.success) throw new Error(purge.error || 'No se pudo eliminar permanentemente desde Gmail.');
+        if (purge.errors?.length) {
+          alert(`Se eliminaron permanentemente ${purge.purged} conversación(es); ${purge.errors.length} no se pudieron eliminar. Google puede tardar hasta 48–72 horas en reflejar el espacio liberado.`);
+        } else {
+          alert(`Eliminación permanente solicitada para ${purge.purged} conversación(es). Google puede tardar hasta 48–72 horas en reflejar el espacio liberado.`);
+        }
+      }
     } catch (error) {
       alert(`Los archivos ya se guardaron, pero Gmail no movió los correos a la Papelera: ${error.message}`);
     }

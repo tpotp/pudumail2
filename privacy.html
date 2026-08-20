@@ -20,22 +20,31 @@
     <h1>Política de Privacidad de Pudú Mail 2</h1>
     <p><em>Última actualización: Agosto 2026</em></p>
 
-    <h2>1. Compromiso de Privacidad 100% Local</h2>
-    <p>Pudú Mail 2 es una herramienta de productividad y gestión de almacenamiento que opera **100% de forma local en el navegador del usuario**. No contamos con servidores que recopilen, almacenen o procesen el contenido de tus correos ni tus archivos adjuntos.</p>
+    <h2>1. Propósito único y procesamiento local</h2>
+    <p>Pudú Mail 2 ayuda a respaldar adjuntos de Gmail en la carpeta Descargas del usuario y, sólo cuando el usuario lo confirma, a limpiar conversaciones. El análisis y las acciones se realizan localmente en el navegador y en la extensión.</p>
+    <p>No utilizamos Gmail API, Google OAuth, identificadores de cliente, secretos, tokens ni un servidor que almacene contenido de Gmail.</p>
 
     <h2>2. Datos que se procesan</h2>
     <ul>
-      <li><strong>Metadatos de archivos adjuntos:</strong> Nombre de archivo, tamaño, tipo MIME y fecha del correo. Estos datos se procesan en la memoria volátil del navegador para permitir el filtrado y ordenamiento.</li>
-      <li><strong>Descargas y movimientos al disco:</strong> Cuando utilizas la función "Mover a mi disco", los archivos se transfieren directamente desde la sesión de Gmail hacia la carpeta seleccionada en tu computadora utilizando la File System Access API nativa de tu navegador.</li>
+      <li><strong>Datos de Gmail:</strong> La extensión procesa nombres, tamaños, tipos de archivo, remitentes, asuntos, fechas y conversaciones visibles en Gmail para presentar el explorador. La interfaz web procesa esos metadatos localmente en la pestaña para mostrarlos; no los transmite ni los almacena en nuestros servidores.</li>
+      <li><strong>Contenido de adjuntos:</strong> Se descarga directamente desde Gmail a <code>Descargas/PuduMail_Adjuntos</code> mediante el gestor de descargas de Chrome. No se sube a Pudú Mail ni a terceros.</li>
+      <li><strong>Datos locales temporales:</strong> Los metadatos necesarios para una sesión se mantienen en memoria o almacenamiento local de la extensión. No vendemos, cedemos ni usamos esos datos para publicidad personalizada.</li>
     </ul>
 
     <h2>3. Conector de Navegador (Extensión)</h2>
-    <p>El conector de navegador de Pudú Mail 2 actúa como un puente directo entre la pestaña de Gmail y la interfaz de usuario. No transmite claves, tokens de acceso ni contenidos a servidores de terceros.</p>
+    <p>El conector usa permisos mínimos para operar en <code>mail.google.com</code>, descargar archivos y mantener la comunicación con la interfaz de Pudú Mail 2. No accede a cookies, contraseñas ni claves de autenticación.</p>
 
-    <h2>4. Publicidad</h2>
-    <p>Pudú Mail 2 puede mostrar anuncios a través de redes publicitarias estándar (como Google AdSense). Los proveedores de anuncios pueden utilizar cookies no invasivas conforme a las políticas estándar de la web.</p>
+    <h2>4. Limpieza de Gmail y riesgos</h2>
+    <p>La limpieza no es automática. Tras una descarga que Chrome informa como completada y existente en el disco, el usuario debe confirmar por separado mover las conversaciones a la Papelera. Una conversación puede incluir mensajes o adjuntos no seleccionados.</p>
+    <p>La Papelera de Gmail sigue contando en la cuota. La eliminación permanente requiere una segunda confirmación explícita, no se puede deshacer y Google puede tardar hasta 48–72 horas en actualizar el espacio disponible.</p>
 
-    <h2>5. Contacto</h2>
+    <h2>5. Publicidad</h2>
+    <p>La pantalla que procesa datos de Gmail no carga redes publicitarias, píxeles de anuncios ni scripts de terceros. Si en el futuro existen contenidos patrocinados, estarán claramente identificados, no se personalizarán con datos de Gmail y se describirán aquí antes de activarse.</p>
+
+    <h2>6. Uso limitado</h2>
+    <p>El uso de los datos se limita a proporcionar las funciones descritas en esta política. Pudú Mail 2 no permite que personas lean datos de Gmail ni los transfiere, vende o utiliza para publicidad personalizada.</p>
+
+    <h2>7. Contacto</h2>
     <p>Para dudas sobre privacidad, puedes contactarnos a: <strong>carlossilcac@gmail.com</strong></p>
   </div>
 </body>

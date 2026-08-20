@@ -4,12 +4,12 @@
 
 ## ✨ Características Principales
 
-- ⚡ **Ordenamiento por tamaño exacto:** Encuentra al instante los archivos más pesados que están consumiendo tu almacenamiento de Google Drive/Gmail.
-- 💾 **Mover a mi disco (File System Access API):** Guarda múltiples adjuntos directamente en cualquier carpeta seleccionada de tu PC en 1 clic.
+- ⚡ **Ordenamiento por tamaño:** Encuentra adjuntos pesados; Gmail puede mostrar tamaños redondeados o estimados según la vista disponible.
+- 💾 **Respaldo verificado:** Guarda adjuntos con el gestor de descargas de Chrome y sólo ofrece limpiar Gmail después de confirmar que Chrome terminó cada archivo.
 - 👁️ **Vista previa interactiva:** Abre y visualiza PDFs, imágenes, videos y documentos sin salir de la aplicación.
 - 🧩 **Conector de 1 Clic (Extensión de Chrome Manifest V3):** Sin barreras de verificación OAuth restringidas ni auditorías CASA de Google.
 - 📥 **Modo Drag & Drop Local:** Soporte para archivos `.mbox` y `.eml` de Google Takeout sin requerir ninguna extensión.
-- 💰 **Monetización lista:** Espacios optimizados para anuncios de Google AdSense o patrocinadores.
+- 🛡️ **Limpieza en dos fases:** Papelera recuperable primero; eliminación permanente sólo con una segunda confirmación explícita.
 
 ## Privacidad del conector
 

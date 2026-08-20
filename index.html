@@ -22,8 +22,6 @@
   <link rel="stylesheet" href="style.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🦌</text></svg>">
 
-  <!-- JSZip for instant in-browser ZIP downloads -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body class="pudu-body">
 
@@ -55,16 +53,6 @@
         </button>
       </div>
     </header>
-
-    <!-- TOP AD BANNER CONTAINER (Optimized for Google AdSense / Sponsor Banners) -->
-    <section class="ad-slot-container top-ad-slot">
-      <div class="ad-placeholder">
-        <span class="ad-label">PUBLICIDAD / ADSENSE</span>
-        <div class="ad-content-box">
-          <p>🌟 <strong>¿Sabías que puedes liberar hasta 10 GB de Gmail?</strong> Ordena tus archivos de mayor a menor y descárgalos a tu PC.</p>
-        </div>
-      </div>
-    </section>
 
     <!-- Storage Statistics Dashboard -->
     <section class="stats-grid">
@@ -150,16 +138,16 @@
           <div class="action-bar-row">
             <div class="action-left">
               <button id="btnSelectAll" class="btn-secondary">Seleccionar Todo</button>
-              <label class="trash-after-save" title="Sólo se activa después de que cada descarga termine correctamente.">
-                <input type="checkbox" id="trashAfterSave"> Enviar correos a Papelera tras guardar
+              <label class="trash-after-save" title="Tras verificar las descargas, se mostrará una confirmación separada antes de modificar Gmail.">
+                <input type="checkbox" id="trashAfterSave"> Ofrecer limpieza de Gmail tras verificar descargas
               </label>
             </div>
             <div class="action-right">
               <button id="btnDownloadZip" class="btn-secondary">
-                <span>📦</span> Descargar ZIP
+                <span>📦</span> Descargar en lote
               </button>
               <button id="btnMoveToDisk" class="btn-success">
-                <span>💾</span> Guardar en Carpeta de mi PC
+                <span>💾</span> Guardar y verificar en mi PC
               </button>
             </div>
           </div>
@@ -194,34 +182,23 @@
 
       </main>
 
-      <!-- SIDEBAR AD & PRO TIPS -->
+      <!-- Privacy and use tips -->
       <aside class="sidebar-layout">
-        
-        <!-- Sidebar AdSense Slot -->
-        <div class="ad-slot-container sidebar-ad-slot">
-          <div class="ad-placeholder">
-            <span class="ad-label">ANUNCIO / SPONSOR</span>
-            <div class="sidebar-ad-inner">
-              <h4>🚀 ¿Espacio de Google Lleno?</h4>
-              <p>Guarda tus adjuntos en tu disco duro y elimina correos pesados para no tener que pagar almacenamiento extra de Google One.</p>
-            </div>
-          </div>
-        </div>
 
         <!-- Quick Tips Card -->
         <div class="card-tips">
           <h3>💡 Consejos de Uso</h3>
           <ul class="tips-list">
-            <li><strong>Guardar al disco:</strong> Elige una carpeta de tu PC y guarda allí sólo los adjuntos seleccionados.</li>
+            <li><strong>Guardar al disco:</strong> Guarda sólo los adjuntos seleccionados en Descargas/PuduMail_Adjuntos.</li>
             <li><strong>Vista Previa:</strong> Haz clic en el icono 👁️ para previsualizar fotos y documentos al instante.</li>
-            <li><strong>100% Privado:</strong> Tus correos y archivos se procesan en tu propio navegador.</li>
+            <li><strong>Limpieza segura:</strong> Revisa ambas confirmaciones antes de mover o eliminar conversaciones.</li>
           </ul>
         </div>
 
         <!-- Security & Legal Card -->
         <div class="card-security">
-          <div class="security-badge">🔒 Privacidad Garantizada</div>
-          <p>Pudú Mail 2 no almacena tus datos en servidores externos. Funciona 100% de forma local.</p>
+          <div class="security-badge">🔒 Procesamiento local</div>
+          <p>No almacenamos ni transmitimos contenido de Gmail a nuestros servidores.</p>
           <div class="security-links">
             <a href="privacy.html">Política de Privacidad</a> • 
             <a href="terms.html">Condiciones</a>
@@ -231,14 +208,6 @@
       </aside>
 
     </div>
-
-    <!-- BOTTOM AD BANNER -->
-    <section class="ad-slot-container bottom-ad-slot">
-      <div class="ad-placeholder">
-        <span class="ad-label">ESPACIO PUBLICITARIO / ADSENSE BANNER</span>
-        <p>Pudú Mail 2 • Herramienta gratuita para gestionar y respaldar tus archivos de Gmail.</p>
-      </div>
-    </section>
 
     <!-- Footer -->
     <footer class="app-footer">

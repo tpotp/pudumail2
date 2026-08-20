@@ -1,7 +1,8 @@
 /* Gmail stays in a private worker tab; no mail data leaves this browser. */
-const EXTENSION_VERSION = '2.3.0';
+const EXTENSION_VERSION = '2.4.0';
 const GMAIL_SEARCH_URL = 'https://mail.google.com/mail/u/0/#search/has%3Aattachment';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+let dashboardTabId = null;
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (!request?.action) return;
@@ -10,11 +11,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return;
   }
   if (request.action === 'SCAN_PROGRESS') return broadcastProgress(request, sendResponse);
-  if (request.action === 'SCAN_GMAIL_ATTACHMENTS') return respond(scanGmail(request.query, request.continue), sendResponse);
+  if (request.action === 'SCAN_GMAIL_ATTACHMENTS') {
+    dashboardTabId = sender.tab?.id ?? dashboardTabId;
+    return respond(scanGmail(request.query, request.continue), sendResponse);
+  }
   if (request.action === 'RESOLVE_ATTACHMENT') return respond(resolveAttachment(request.item), sendResponse);
   if (request.action === 'DOWNLOAD_ATTACHMENT') return respond(downloadAttachment(request.item || request), sendResponse);
   if (request.action === 'BATCH_DOWNLOAD') return respond(downloadBatch(request.items), sendResponse);
   if (request.action === 'TRASH_CONVERSATIONS') return respond(trashConversations(request.items), sendResponse);
+  if (request.action === 'PURGE_CONVERSATIONS') return respond(purgeConversations(request.items), sendResponse);
   sendResponse({ success: false, error: `Acción '${request.action}' no reconocida` });
 });
 
@@ -25,11 +30,7 @@ function respond(promise, sendResponse) {
 }
 
 function broadcastProgress(request, sendResponse) {
-  chrome.tabs.query({}).then(tabs => tabs.forEach(tab => {
-    if (/^https:\/\/(pudumail2\.vercel\.app|localhost|127\.0\.0\.1)/.test(tab.url || '')) {
-      chrome.tabs.sendMessage(tab.id, request).catch(() => {});
-    }
-  }));
+  if (Number.isInteger(dashboardTabId)) chrome.tabs.sendMessage(dashboardTabId, request).catch(() => {});
   sendResponse({ success: true });
 }
 
@@ -114,7 +115,7 @@ async function scanGmail(query, continuing = false) {
 }
 
 async function resolveAttachment(item) {
-  if (!item?.filename || !item?.threadId) throw new Error('Falta el identificador de Gmail para este adjunto.');
+  if (!item?.filename || (!item?.threadId && !item?.threadUrl)) throw new Error('Falta el identificador de Gmail para este adjunto.');
   const result = await askGmail('RESOLVE_ATTACHMENT', { item });
   if (!result.downloadUrl) throw new Error(`Gmail no entregó un enlace de descarga para ${item.filename}.`);
   return { attachment: { ...item, ...result, downloadUrl: result.downloadUrl } };
@@ -127,49 +128,86 @@ async function downloadAttachment(item) {
     filename: `PuduMail_Adjuntos/${safeFilename(attachment.filename)}`,
     saveAs: false,
   });
-  await waitForDownload(downloadId);
-  return { downloadId, attachment };
+  const verification = await waitForDownload(downloadId);
+  return { downloadId, attachment, verification };
 }
 
 async function downloadBatch(items = []) {
-  const attachments = [];
+  const completed = [];
   const errors = [];
+  const failedConversations = new Set();
   for (const item of items) {
-    try { attachments.push((await downloadAttachment(item)).attachment); }
-    catch (error) { errors.push(`${item.filename}: ${error.message}`); }
+    try { completed.push(await downloadAttachment(item)); }
+    catch (error) {
+      failedConversations.add(conversationKey(item));
+      errors.push(`${item.filename}: ${error.message}`);
+    }
   }
-  return { downloaded: attachments.length, total: items.length, attachments, errors };
+  const cleanupItems = completed
+    .map(result => publicAttachment(result.attachment))
+    .filter(item => !failedConversations.has(conversationKey(item)));
+  return {
+    downloaded: completed.length,
+    total: items.length,
+    attachments: completed.map(result => publicAttachment(result.attachment)),
+    cleanupItems,
+    verifications: completed.map(result => ({ filename: result.attachment.filename, ...result.verification })),
+    errors,
+  };
 }
 
 function waitForDownload(downloadId) {
   return new Promise((resolve, reject) => {
     let timeout;
-    const finish = error => {
+      const finish = (error, item) => {
       if (!timeout) return;
       clearTimeout(timeout);
       timeout = null;
       chrome.downloads.onChanged.removeListener(onChanged);
-      error ? reject(error) : resolve();
+      error ? reject(error) : resolve(item);
     };
     const onChanged = delta => {
       if (delta.id !== downloadId || !delta.state) return;
-      if (delta.state.current === 'complete') finish();
+      if (delta.state.current === 'complete') inspect();
       if (delta.state.current === 'interrupted') finish(new Error('La descarga fue interrumpida.'));
     };
+    const inspect = () => chrome.downloads.search({ id: downloadId }, downloads => {
+      const item = downloads[0];
+      if (item?.state === 'complete' && item.exists !== false) {
+        finish(null, {
+          exists: item.exists !== false,
+          fileSize: item.fileSize,
+          totalBytes: item.totalBytes,
+        });
+      }
+      if (item?.state === 'complete' && item.exists === false) finish(new Error('Chrome no encontró el archivo descargado.'));
+      if (item?.state === 'interrupted') finish(new Error('La descarga fue interrumpida.'));
+    });
     chrome.downloads.onChanged.addListener(onChanged);
     timeout = setTimeout(() => finish(new Error('La descarga no terminó a tiempo.')), 120000);
-    chrome.downloads.search({ id: downloadId }, downloads => {
-      if (downloads[0]?.state === 'complete') finish();
-      if (downloads[0]?.state === 'interrupted') finish(new Error('La descarga fue interrumpida.'));
-    });
+    inspect();
   });
 }
 
 async function trashConversations(items = []) {
   const result = await askGmail('TRASH_CONVERSATIONS', { items });
-  return { trashed: result.trashed || 0, errors: result.errors || [] };
+  return { trashed: result.trashed || 0, trashedItems: result.trashedItems || [], errors: result.errors || [] };
+}
+
+async function purgeConversations(items = []) {
+  const result = await askGmail('PURGE_CONVERSATIONS', { items });
+  return { purged: result.purged || 0, errors: result.errors || [] };
 }
 
 function safeFilename(name) {
   return String(name || 'adjunto').replace(/[\\/:*?"<>|]/g, '_');
+}
+
+function conversationKey(item) {
+  return item?.threadUrl || item?.threadId || `attachment:${item?.id || item?.filename || ''}`;
+}
+
+function publicAttachment(attachment) {
+  const { downloadUrl, ...metadata } = attachment;
+  return metadata;
 }

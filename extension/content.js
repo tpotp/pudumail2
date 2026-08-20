@@ -1,6 +1,6 @@
 (() => {
-if (globalThis.__puduGmailContentVersion === '2.3.0') return;
-globalThis.__puduGmailContentVersion = '2.3.0';
+if (globalThis.__puduGmailContentVersion === '2.4.0') return;
+globalThis.__puduGmailContentVersion = '2.4.0';
 
 /**
  * PUDÚ MAIL 2 — GMAIL CONTENT SCRIPT (v4 — Multi-Strategy Resilient)
@@ -343,13 +343,29 @@ function findTrashButton() {
   return matches.find(element => element.closest('[role="toolbar"]')) || null;
 }
 
+function findPermanentDeleteButton() {
+  const labels = ['eliminar definitivamente', 'eliminar para siempre', 'delete forever', 'permanently delete'];
+  const matches = Array.from(document.querySelectorAll('[aria-label], [data-tooltip]')).filter(element => {
+    const label = `${element.getAttribute('aria-label') || ''} ${element.getAttribute('data-tooltip') || ''}`.toLowerCase();
+    return labels.some(word => label.includes(word)) && element.offsetParent !== null;
+  });
+  return matches.find(element => element.closest('[role="toolbar"]')) || null;
+}
+
+function trashTarget(item) {
+  if (item?.threadId) return `#trash/${item.threadId}`;
+  const hash = item?.threadUrl?.slice(item.threadUrl.indexOf('#')) || '';
+  return hash.replace(/^#(?:all|inbox|search|category|label)\//, '#trash/');
+}
+
 async function trashConversations(items) {
-  const targets = [...new Set((items || []).map(item =>
-    item.threadUrl ? item.threadUrl.slice(item.threadUrl.indexOf('#')) : item.threadId ? `#all/${item.threadId}` : ''
-  ).filter(Boolean))];
+  const targets = [...new Map((items || []).map(item => [
+    item.threadUrl ? item.threadUrl.slice(item.threadUrl.indexOf('#')) : item.threadId ? `#all/${item.threadId}` : '', item
+  ]).filter(([target]) => target)).entries()];
   let trashed = 0;
   const errors = [];
-  for (const target of targets) {
+  const trashedItems = [];
+  for (const [target, item] of targets) {
     window.location.hash = target;
     let button = null;
     for (let attempt = 0; attempt < 40; attempt++) {
@@ -363,9 +379,33 @@ async function trashConversations(items) {
     }
     robustClick(button);
     trashed++;
+    trashedItems.push(item);
     await sleep(700);
   }
-  return { trashed, errors };
+  return { trashed, trashedItems, errors };
+}
+
+async function purgeConversations(items) {
+  const targets = [...new Map((items || []).map(item => [trashTarget(item), item]).filter(([target]) => target)).entries()];
+  let purged = 0;
+  const errors = [];
+  for (const [target] of targets) {
+    window.location.hash = target;
+    let button = null;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      await sleep(250);
+      button = findPermanentDeleteButton();
+      if (button) break;
+    }
+    if (!button) {
+      errors.push(`${target}: no se encontró el botón de eliminación permanente en Gmail.`);
+      continue;
+    }
+    robustClick(button);
+    purged++;
+    await sleep(700);
+  }
+  return { purged, errors };
 }
 
 function reportProgress(page, message) {
@@ -580,7 +620,7 @@ async function scanOnePage(query, continuing) {
 // ── Listener de mensajes ─────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'GMAIL_READY') {
-    sendResponse({ success: true, version: '2.3.0', count: attachmentCache.size });
+    sendResponse({ success: true, version: '2.4.0', count: attachmentCache.size });
     return false;
   }
 
@@ -608,6 +648,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'TRASH_CONVERSATIONS') {
     trashConversations(request.items)
+      .then(result => sendResponse({ success: true, ...result }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (request.action === 'PURGE_CONVERSATIONS') {
+    purgeConversations(request.items)
       .then(result => sendResponse({ success: true, ...result }))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
