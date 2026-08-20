@@ -595,12 +595,15 @@ async function scanOnePage(query, continuing) {
 
   if (scanState.page === 0) {
     scanState.page = 1;
-  } else if (!await advanceSearchPage(scanState.page + 1)) {
+  } else if (await advanceSearchPage(scanState.page + 1)) {
+    scanState.page++;
+  } else {
     scanState.done = true;
   }
 
   if (!scanState.done) {
     fullScan();
+    // Use the next button to determine if we are done, but also check if we found anything new.
     const next = findNextButton();
     scanState.done = !next.element || next.disabled;
   }
