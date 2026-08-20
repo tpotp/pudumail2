@@ -31,11 +31,12 @@ function handleMessage(request, sender, sendResponse) {
 
     case 'SCAN_PROGRESS':
       // Broadcast to any pudumail web app tabs
-      chrome.tabs.query({ url: "*://pudumail2.vercel.app/*" }).then(tabs => {
-        tabs.forEach(t => chrome.tabs.sendMessage(t.id, request));
-      });
-      chrome.tabs.query({ url: "*://localhost/*" }).then(tabs => {
-        tabs.forEach(t => chrome.tabs.sendMessage(t.id, request));
+      chrome.tabs.query({}).then(tabs => {
+        tabs.forEach(t => {
+          if (t.url && (t.url.includes('vercel.app') || t.url.includes('localhost') || t.url.includes('127.0.0.1'))) {
+            chrome.tabs.sendMessage(t.id, request).catch(() => {});
+          }
+        });
       });
       sendResponse({ success: true });
       return false;
