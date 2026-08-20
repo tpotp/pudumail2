@@ -99,10 +99,10 @@ class ExtensionBridge {
         query: query
       }, '*');
 
-      // Safety timeout: 4.5 seconds max so user is NEVER stuck forever
+      // Safety timeout: 15s to allow auto-scroll scanning
       setTimeout(() => {
         if (!resolved) {
-          console.warn('%c[Pudú Bridge Web] ⏱️ Timeout de espera de escaneo alcanzado.', 'color: #ef4444;');
+          console.warn('%c[Pudú Bridge Web] ⏱️ Timeout de espera de escaneo alcanzado (15s).', 'color: #ef4444;');
           window.removeEventListener('message', responseHandler);
           
           if (!this.isInstalled && document.documentElement.getAttribute('data-pudu-connector') !== 'ready') {
@@ -120,7 +120,7 @@ class ExtensionBridge {
             });
           }
         }
-      }, 4500);
+      }, 15000);
     });
   }
 

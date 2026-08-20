@@ -187,8 +187,21 @@ class PuduApp {
 
   async handleScanGmail() {
     console.log('%c[Pudú App] 🚀 Botón Explorar Gmail clickeado', 'color: #38bdf8; font-weight: bold;');
-    this.showLoading(true, 'Conectando con Gmail mediante el Conector...');
+    this.showLoading(true, '🔍 Escaneando adjuntos en tu Gmail…');
     
+    // Animate the loading message to show progress
+    const msgs = [
+      '🔍 Escaneando adjuntos en tu Gmail…',
+      '📜 Desplazando la bandeja para encontrar más correos…',
+      '📎 Extrayendo nombres de archivos y tamaños…',
+      '⚡ Casi listo, procesando resultados…'
+    ];
+    let msgIdx = 0;
+    const progressInterval = setInterval(() => {
+      msgIdx = Math.min(msgIdx + 1, msgs.length - 1);
+      this.showLoading(true, msgs[msgIdx]);
+    }, 3000);
+
     try {
       const result = await window.PuduBridge.scanGmail('has:attachment');
       console.log('%c[Pudú App] Resultado del escaneo:', 'color: #10b981;', result);
@@ -200,13 +213,17 @@ class PuduApp {
       } else if (result.needsExtension) {
         this.openExtensionModal();
       } else {
-        console.log('%c[Pudú App] Cargando datos iniciales...', 'color: #f59e0b;');
-        this.loadSampleData();
+        // No attachments found — show helpful message, NOT fake data
+        console.log('%c[Pudú App] ⚠️ No se encontraron adjuntos reales', 'color: #f59e0b;');
+        this.attachments = [];
+        this.applyFiltersAndRender();
+        alert('No se encontraron adjuntos visibles.\n\nConsejo: Abre Gmail en otra pestaña, navega a la búsqueda "has:attachment" y luego vuelve a hacer clic en "Explorar Gmail".\n\nEl conector necesita que Gmail esté abierto con correos que tengan adjuntos visibles.');
       }
     } catch (err) {
       console.error('[Pudú App] Error en handleScanGmail:', err);
-      this.loadSampleData();
+      alert('Error al conectar con Gmail. Asegúrate de tener Gmail abierto en otra pestaña.');
     } finally {
+      clearInterval(progressInterval);
       this.showLoading(false);
     }
   }

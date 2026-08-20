@@ -1,216 +1,543 @@
 /**
- * PUDÚ MAIL 2 - CONTENT SCRIPT (GMAIL DOM SCANNER)
- * Intelligent extractor for Gmail Web attachments, chips, threads, and download URLs.
+ * PUDÚ MAIL 2 — GMAIL CONTENT SCRIPT (v2)
+ *
+ * Architecture:
+ *   1. A persistent MutationObserver watches the Gmail DOM for attachment
+ *      elements as the user navigates (SPA transitions, scrolling, opening
+ *      emails). Extracted items are stored in `attachmentCache`.
+ *   2. On EXTRACT_ATTACHMENTS request from background.js:
+ *      a) Return whatever is already cached.
+ *      b) Kick off a deep DOM scan + optional auto-scroll to collect more.
+ *      c) Return combined results.
+ *
+ * Selector strategy:
+ *   - Prefer aria-label, role, title, download attributes (stable across
+ *     Gmail updates) over obfuscated class names.
+ *   - Use class names only as a secondary hint, never as the sole selector.
  */
 
-console.log('%c[Pudú Mail Conector] 🦌 Activo en Gmail Web', 'color: #38bdf8; font-weight: bold;');
+console.log('%c[Pudú Content v2] 🦌 Activo en Gmail', 'color:#38bdf8;font-weight:bold');
 
-// Listen for background requests
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === 'EXTRACT_ATTACHMENTS') {
-    console.log('%c[Pudú Content] 🔍 Solicitud de escaneo recibida:', 'color: #f59e0b;', request);
-    const attachments = extractGmailAttachments(request.query);
-    console.log('%c[Pudú Content] ✅ Adjuntos encontrados:', 'color: #10b981; font-weight: bold;', attachments.length, attachments);
-    sendResponse({ success: true, count: attachments.length, attachments: attachments });
-  }
-  return true;
-});
+// ── Attachment Cache ────────────────────────────────────────────────
+const attachmentCache = new Map(); // key = dedup string, value = attachment object
 
-/**
- * Extract attachments visible in the Gmail web interface
- */
-function extractGmailAttachments(query) {
-  const list = [];
-  const seenKeys = new Set();
+// ── Helpers ─────────────────────────────────────────────────────────
+const FILE_EXT_RE = /\.(pdf|docx?|xlsx?|pptx?|csv|txt|rtf|odt|zip|rar|7z|gz|tar|jpg|jpeg|png|gif|webp|svg|bmp|ico|mp4|mov|avi|mkv|webm|mp3|wav|ogg|flac|aac|eml|msg|ics|html?|xml|json|apk|exe|dmg|iso)$/i;
 
-  try {
-    // 1. Selector strategy A: Attachment Cards inside opened emails (div.aZo, div.hq, div[role="listitem"] attachment chips)
-    const attachmentCards = document.querySelectorAll('div.aZo, div.hq, div.a3I, div[aria-label*="Adjunto:"], div[aria-label*="Attachment:"]');
-    console.log('[Pudú Content] Tarjetas de adjunto encontradas en vista de correo:', attachmentCards.length);
-
-    attachmentCards.forEach((card, idx) => {
-      try {
-        let filename = '';
-        let mimeType = 'application/octet-stream';
-        let downloadUrl = '';
-        let sizeBytes = 1024 * 1024;
-        let sizeFormatted = '1.0 MB';
-
-        // Extract download_url attribute if present (MIME:filename:URL)
-        const dlAttr = card.getAttribute('download_url') || card.querySelector('[download_url]')?.getAttribute('download_url') || '';
-        if (dlAttr) {
-          const parts = dlAttr.split(':');
-          if (parts.length >= 3) {
-            mimeType = parts[0] || mimeType;
-            filename = decodeURIComponent(parts[1] || '');
-            downloadUrl = parts.slice(2).join(':');
-          }
-        }
-
-        // Search for direct download links <a>
-        const linkEl = card.querySelector('a[href*="view=att"], a[href*="disp=attd"], a[href*="disp=inline"], a[download]');
-        if (linkEl && linkEl.href) {
-          downloadUrl = linkEl.href;
-        }
-
-        // Search for title/name
-        const nameEl = card.querySelector('.aV3, .aQA, span[title], div[title], .a48');
-        if (nameEl) {
-          const text = nameEl.getAttribute('title') || nameEl.innerText || '';
-          if (text.trim()) filename = text.trim();
-        }
-
-        // Search for size (e.g. "2.4 MB", "540 KB")
-        const sizeEl = card.querySelector('.a44, span.aS2, .aV3 + span, .a49');
-        if (sizeEl && sizeEl.innerText) {
-          sizeFormatted = sizeEl.innerText.trim();
-          sizeBytes = parseHumanSizeToBytes(sizeFormatted);
-        }
-
-        // Find parent email details
-        const msgContainer = card.closest('div[role="listitem"], tr, div.nH');
-        let sender = 'Remitente Gmail';
-        let subject = 'Correo con adjunto';
-        let date = new Date().toISOString();
-
-        if (msgContainer) {
-          const senderEl = msgContainer.querySelector('span[email], .yP, .zF, .bqe, .gD');
-          if (senderEl) sender = senderEl.innerText || senderEl.getAttribute('email') || sender;
-
-          const subjEl = document.querySelector('h2.hP, .bog, span[data-thread-perm-id]');
-          if (subjEl) subject = subjEl.innerText || subject;
-        }
-
-        filename = sanitizeFilename(filename, idx + 1, mimeType);
-        const key = filename + '_' + sizeBytes;
-
-        if (!seenKeys.has(key)) {
-          seenKeys.add(key);
-          list.push({
-            id: `pudu_gmail_att_${idx}_${Date.now()}`,
-            filename: filename,
-            mimeType: mimeType,
-            sizeBytes: sizeBytes,
-            sizeFormatted: sizeFormatted || formatBytes(sizeBytes),
-            sender: sender,
-            subject: subject,
-            date: date,
-            downloadUrl: formatDownloadUrl(downloadUrl)
-          });
-        }
-      } catch (err) {
-        console.warn('[Pudú Content] Error procesando tarjeta:', err);
-      }
-    });
-
-    // 2. Selector strategy B: Attachment Chips in Search / Inbox List View (e.g. search "has:attachment")
-    const listChips = document.querySelectorAll('div.brs, span.brc, div[role="button"][aria-label*="."], div.y6 span[title*="."]');
-    console.log('[Pudú Content] Chips de adjuntos en lista de correos:', listChips.length);
-
-    listChips.forEach((chip, idx) => {
-      try {
-        let chipName = chip.getAttribute('aria-label') || chip.getAttribute('title') || chip.innerText || '';
-        chipName = chipName.replace(/^(Archivo adjunto:|Attachment:)/i, '').trim();
-
-        if (chipName && chipName.includes('.')) {
-          const row = chip.closest('tr, div[role="row"], div.zA');
-          let sender = 'Remitente';
-          let subject = 'Correo con adjunto';
-          let date = new Date().toISOString();
-
-          if (row) {
-            const senderEl = row.querySelector('.yP, .zF, .bqe, span[email]');
-            if (senderEl) sender = senderEl.innerText || senderEl.getAttribute('email') || sender;
-
-            const subjEl = row.querySelector('.bog, .bqe');
-            if (subjEl) subject = subjEl.innerText || subject;
-
-            const dateEl = row.querySelector('.xW, span[title]');
-            if (dateEl) date = dateEl.innerText || date;
-          }
-
-          // Estimate realistic sizes based on extension if not in DOM
-          const ext = chipName.split('.').pop().toLowerCase();
-          let estimatedBytes = 2.4 * 1024 * 1024;
-          if (['zip', 'rar', 'mp4', 'mov'].includes(ext)) estimatedBytes = 45 * 1024 * 1024;
-          else if (['pdf', 'docx', 'xlsx'].includes(ext)) estimatedBytes = 3.8 * 1024 * 1024;
-          else if (['jpg', 'png', 'webp'].includes(ext)) estimatedBytes = 1.6 * 1024 * 1024;
-
-          const key = chipName + '_' + sender;
-          if (!seenKeys.has(key)) {
-            seenKeys.add(key);
-            list.push({
-              id: `pudu_chip_${idx}_${Date.now()}`,
-              filename: chipName,
-              mimeType: getMimeFromFilename(chipName),
-              sizeBytes: estimatedBytes,
-              sizeFormatted: formatBytes(estimatedBytes),
-              sender: sender,
-              subject: subject,
-              date: date,
-              downloadUrl: '#'
-            });
-          }
-        }
-      } catch (e) {
-        console.warn('[Pudú Content] Error procesando chip:', e);
-      }
-    });
-
-  } catch (error) {
-    console.error('[Pudú Content] Error general en extractGmailAttachments:', error);
-  }
-
-  return list;
+function isLikelyFilename(str) {
+  if (!str || str.length < 3 || str.length > 260) return false;
+  return FILE_EXT_RE.test(str.trim());
 }
 
-function sanitizeFilename(filename, index, mimeType) {
-  if (!filename || filename.startsWith('adjunto_') || filename.length < 3) {
-    let ext = '.pdf';
-    if (mimeType.includes('image')) ext = '.png';
-    else if (mimeType.includes('video')) ext = '.mp4';
-    else if (mimeType.includes('zip')) ext = '.zip';
-    return `Documento_Adjunto_${index}${ext}`;
-  }
-  return filename;
+function getExtension(filename) {
+  const m = filename.match(/\.([a-zA-Z0-9]{1,10})$/);
+  return m ? m[1].toLowerCase() : '';
 }
 
-function formatDownloadUrl(url) {
-  if (!url || url === '#' || url.startsWith('http://localhost') || url.includes('mail2.vercel.app')) {
-    return '#';
-  }
-  if (url.startsWith('/')) {
-    return 'https://mail.google.com' + url;
-  }
-  if (url.startsWith('?')) {
-    return 'https://mail.google.com/mail/u/0/' + url;
-  }
-  return url;
+function guessMimeType(filename) {
+  const ext = getExtension(filename);
+  const map = {
+    pdf: 'application/pdf',
+    doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    csv: 'text/csv', txt: 'text/plain', rtf: 'application/rtf', html: 'text/html',
+    zip: 'application/zip', rar: 'application/x-rar-compressed', '7z': 'application/x-7z-compressed', gz: 'application/gzip', tar: 'application/x-tar',
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon',
+    mp4: 'video/mp4', mov: 'video/quicktime', avi: 'video/x-msvideo', mkv: 'video/x-matroska', webm: 'video/webm',
+    mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', flac: 'audio/flac', aac: 'audio/aac',
+    eml: 'message/rfc822', ics: 'text/calendar', json: 'application/json', xml: 'application/xml',
+    apk: 'application/vnd.android.package-archive', exe: 'application/x-msdownload', dmg: 'application/x-apple-diskimage', iso: 'application/x-iso9660-image'
+  };
+  return map[ext] || 'application/octet-stream';
 }
 
-function getMimeFromFilename(filename) {
-  const ext = filename.split('.').pop().toLowerCase();
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return `image/${ext === 'jpg' ? 'jpeg' : ext}`;
-  if (ext === 'pdf') return 'application/pdf';
-  if (['mp4', 'mov', 'webm'].includes(ext)) return `video/${ext}`;
-  if (['zip', 'rar', '7z'].includes(ext)) return 'application/zip';
-  return 'application/octet-stream';
-}
-
-function parseHumanSizeToBytes(str) {
-  if (!str) return 1024 * 1024;
-  const clean = str.toUpperCase().trim();
-  const num = parseFloat(clean.replace(/[^0-9.]/g, '')) || 1;
-  if (clean.includes('GB')) return Math.round(num * 1024 * 1024 * 1024);
-  if (clean.includes('MB')) return Math.round(num * 1024 * 1024);
+function parseHumanSize(str) {
+  if (!str) return 0;
+  const clean = str.toUpperCase().replace(/\s/g, '');
+  const num = parseFloat(clean.replace(/[^0-9.]/g, '')) || 0;
+  if (clean.includes('GB')) return Math.round(num * 1073741824);
+  if (clean.includes('MB')) return Math.round(num * 1048576);
   if (clean.includes('KB') || clean.includes('K')) return Math.round(num * 1024);
-  return Math.round(num);
+  if (num > 0) return Math.round(num);
+  return 0;
 }
 
 function formatBytes(bytes) {
-  if (!bytes || bytes === 0) return '0 B';
+  if (!bytes || bytes <= 0) return '—';
   const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const s = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + s[i];
+}
+
+function dedupKey(filename, sender) {
+  return `${(filename || '').toLowerCase().trim()}|${(sender || '').toLowerCase().trim()}`;
+}
+
+// ── Strategy 1: Opened-email attachment cards ────────────────────────
+// When a user opens an email, Gmail renders attachment "cards" (thumbnails).
+// These are the richest source of data: they contain download_url, filename,
+// size, and a direct download link.
+function extractFromOpenedEmail() {
+  const found = [];
+
+  // 1a) Elements with download_url attribute (most reliable in email view)
+  //     Format: "mime/type:filename:https://mail.google.com/…"
+  document.querySelectorAll('[download_url]').forEach(el => {
+    const raw = el.getAttribute('download_url');
+    if (!raw) return;
+    const colonIdx1 = raw.indexOf(':');
+    if (colonIdx1 === -1) return;
+    const rest = raw.substring(colonIdx1 + 1);
+    const colonIdx2 = rest.indexOf(':');
+    if (colonIdx2 === -1) return;
+
+    const mime = raw.substring(0, colonIdx1);
+    const filename = decodeURIComponent(rest.substring(0, colonIdx2));
+    const url = rest.substring(colonIdx2 + 1);
+
+    if (!filename) return;
+
+    // Try to find a size label nearby
+    let sizeText = '';
+    const parent = el.closest('div') || el.parentElement;
+    if (parent) {
+      const allSpans = parent.querySelectorAll('span');
+      allSpans.forEach(sp => {
+        const t = sp.innerText || '';
+        if (/^\d+(\.\d+)?\s*(KB|MB|GB|B)$/i.test(t.trim())) {
+          sizeText = t.trim();
+        }
+      });
+    }
+
+    // Context: sender + subject from the open email
+    const { sender, subject, date } = getOpenEmailContext(el);
+
+    found.push({
+      filename, mimeType: mime || guessMimeType(filename),
+      downloadUrl: url || '#',
+      sizeBytes: parseHumanSize(sizeText), sizeFormatted: sizeText || '—',
+      sender, subject, date
+    });
+  });
+
+  // 1b) <a> elements with href containing attachment download params
+  document.querySelectorAll('a[href*="view=att"], a[href*="disp=attd"], a[download]').forEach(a => {
+    let filename = a.getAttribute('download') || a.getAttribute('aria-label') || a.innerText || '';
+    filename = filename.trim();
+    if (!filename || !isLikelyFilename(filename)) {
+      // Try title or nearby span
+      const titleEl = a.closest('[title]') || a.querySelector('[title]');
+      if (titleEl) filename = titleEl.getAttribute('title');
+    }
+    if (!filename || filename.length < 2) return;
+
+    const { sender, subject, date } = getOpenEmailContext(a);
+
+    found.push({
+      filename, mimeType: guessMimeType(filename),
+      downloadUrl: a.href || '#',
+      sizeBytes: 0, sizeFormatted: '—',
+      sender, subject, date
+    });
+  });
+
+  // 1c) Elements with aria-label that looks like a filename (attachment cards)
+  document.querySelectorAll('[aria-label]').forEach(el => {
+    const label = el.getAttribute('aria-label') || '';
+    // Clean common prefixes Gmail adds
+    let cleaned = label
+      .replace(/^(Adjunto|Attachment|Archivo adjunto|Descargar|Download|Preview|Vista previa)[:\s]*/i, '')
+      .trim();
+
+    if (!isLikelyFilename(cleaned)) return;
+
+    // Avoid duplicates from download_url elements
+    const hasDownloadUrl = el.querySelector('[download_url]') || el.closest('[download_url]');
+    if (hasDownloadUrl) return;
+
+    // Look for size nearby
+    let sizeText = '';
+    const spans = el.querySelectorAll('span');
+    spans.forEach(sp => {
+      const t = (sp.innerText || '').trim();
+      if (/^\d+(\.\d+)?\s*(KB|MB|GB|B)$/i.test(t)) sizeText = t;
+    });
+
+    // Look for a download link
+    let downloadUrl = '#';
+    const link = el.querySelector('a[href*="mail.google.com"], a[href*="googleusercontent"]');
+    if (link) downloadUrl = link.href;
+
+    const { sender, subject, date } = getOpenEmailContext(el);
+
+    found.push({
+      filename: cleaned, mimeType: guessMimeType(cleaned),
+      downloadUrl, sizeBytes: parseHumanSize(sizeText), sizeFormatted: sizeText || '—',
+      sender, subject, date
+    });
+  });
+
+  return found;
+}
+
+function getOpenEmailContext(el) {
+  let sender = '', subject = '', date = '';
+
+  // Try to find the open email header
+  // Subject is usually in h2 or an element with data-thread-perm-id
+  const subjectEl = document.querySelector('h2[data-thread-perm-id], h2.hP, div.ha h2, [data-legacy-thread-id] h2');
+  if (subjectEl) subject = subjectEl.innerText || '';
+  if (!subject) {
+    const h2s = document.querySelectorAll('h2');
+    for (const h of h2s) {
+      const t = (h.innerText || '').trim();
+      if (t.length > 3 && t.length < 200) { subject = t; break; }
+    }
+  }
+
+  // Sender: look for [email] attribute or gD class
+  const senderEl = document.querySelector('span[email], span.gD, span.go, [data-hovercard-id]');
+  if (senderEl) {
+    sender = senderEl.getAttribute('email') || senderEl.getAttribute('data-hovercard-id') || senderEl.innerText || '';
+  }
+
+  // Date: look for date spans near the email header
+  const dateEl = document.querySelector('span.g3, span[title][aria-label]');
+  if (dateEl) date = dateEl.getAttribute('title') || dateEl.innerText || '';
+
+  return {
+    sender: sender || 'Gmail',
+    subject: subject || 'Correo',
+    date: date || new Date().toISOString()
+  };
+}
+
+// ── Strategy 2: Inbox / search list view attachment chips ────────────
+// In the email list (inbox, search results), Gmail shows small attachment
+// chips with the file name. These don't have download URLs but give us
+// metadata.
+function extractFromListView() {
+  const found = [];
+
+  // 2a) Scan every table row in the inbox/search list
+  const rows = document.querySelectorAll('tr.zA, tr[role="row"], div[role="row"], tr');
+
+  rows.forEach(row => {
+    // Skip rows that are clearly not email rows
+    if (!row.querySelector('td, div[role="gridcell"]')) return;
+
+    // Find attachment chips within this row
+    // Gmail wraps attachment chips in small spans/divs; they usually have
+    // the filename as their text content and/or in aria-label/title.
+    const chipCandidates = row.querySelectorAll(
+      'span[title], span[aria-label], div[title], div[data-tooltip]'
+    );
+
+    let sender = '';
+    let subject = '';
+    let date = '';
+
+    // Extract sender
+    const senderEl = row.querySelector('span[email], span.bA4, span.yP, span.zF, span.yW span[email], [data-hovercard-id]');
+    if (senderEl) sender = senderEl.getAttribute('email') || senderEl.innerText || '';
+    if (!sender) {
+      // Try first <span> in the sender column
+      const nameSpan = row.querySelector('td.yX span, td.xY span, div.yW span');
+      if (nameSpan) sender = nameSpan.innerText || '';
+    }
+
+    // Extract subject
+    const subjectEl = row.querySelector('span.bog, span.bqe, span.y2, td.xY span.y2');
+    if (subjectEl) subject = subjectEl.innerText || '';
+    if (!subject) {
+      // Fallback: look for the biggest text span in the row
+      const spans = row.querySelectorAll('span');
+      let maxLen = 0;
+      spans.forEach(s => {
+        const t = (s.innerText || '').trim();
+        if (t.length > maxLen && t.length > 5 && t.length < 200 && !t.includes('@') && !isLikelyFilename(t)) {
+          maxLen = t.length;
+          subject = t;
+        }
+      });
+    }
+
+    // Extract date
+    const dateEl = row.querySelector('td.xW span, span.bq3, span[title]');
+    if (dateEl) {
+      const title = dateEl.getAttribute('title') || '';
+      date = title || dateEl.innerText || '';
+    }
+
+    // Now check each candidate for filenames
+    chipCandidates.forEach(chip => {
+      const label = chip.getAttribute('title') || chip.getAttribute('aria-label') || chip.getAttribute('data-tooltip') || chip.innerText || '';
+      const cleaned = label
+        .replace(/^(Adjunto|Attachment|Archivo adjunto)[:\s]*/i, '')
+        .trim();
+
+      if (isLikelyFilename(cleaned)) {
+        found.push({
+          filename: cleaned,
+          mimeType: guessMimeType(cleaned),
+          downloadUrl: '#', // No direct URL in list view
+          sizeBytes: 0,
+          sizeFormatted: '—',
+          sender: sender || 'Gmail',
+          subject: subject || 'Correo',
+          date: date || new Date().toISOString()
+        });
+      }
+    });
+
+    // 2b) Also look for chips that are just visible text matching file patterns
+    // (some Gmail themes render chips as plain text spans)
+    const allTextNodes = row.querySelectorAll('span, div');
+    allTextNodes.forEach(node => {
+      const text = (node.innerText || '').trim();
+      if (text.length >= 4 && text.length <= 100 && isLikelyFilename(text)) {
+        // Check we haven't already found this
+        const existsAlready = found.some(f => f.filename.toLowerCase() === text.toLowerCase() && f.sender === (sender || 'Gmail'));
+        if (!existsAlready) {
+          found.push({
+            filename: text,
+            mimeType: guessMimeType(text),
+            downloadUrl: '#',
+            sizeBytes: 0,
+            sizeFormatted: '—',
+            sender: sender || 'Gmail',
+            subject: subject || 'Correo',
+            date: date || new Date().toISOString()
+          });
+        }
+      }
+    });
+  });
+
+  return found;
+}
+
+// ── Strategy 3: Deep generic scan ────────────────────────────────────
+// Last resort: walk the entire document looking for anything that looks
+// like a filename.
+function extractGenericDeepScan() {
+  const found = [];
+  const seen = new Set();
+
+  // Look for ALL elements with title/aria-label/download attributes
+  const candidates = document.querySelectorAll(
+    '[title], [aria-label], [download], [download_url], a[href*="view=att"], a[href*="disp=attd"]'
+  );
+
+  candidates.forEach(el => {
+    const attrs = [
+      el.getAttribute('title'),
+      el.getAttribute('aria-label'),
+      el.getAttribute('download'),
+    ].filter(Boolean);
+
+    attrs.forEach(raw => {
+      const cleaned = raw
+        .replace(/^(Adjunto|Attachment|Archivo adjunto|Descargar|Download|Preview|Vista previa)[:\s]*/i, '')
+        .trim();
+
+      if (isLikelyFilename(cleaned) && !seen.has(cleaned.toLowerCase())) {
+        seen.add(cleaned.toLowerCase());
+
+        let url = '#';
+        if (el.tagName === 'A' && el.href) url = el.href;
+        const nearLink = el.querySelector('a[href]');
+        if (nearLink && nearLink.href.includes('mail.google.com')) url = nearLink.href;
+
+        found.push({
+          filename: cleaned,
+          mimeType: guessMimeType(cleaned),
+          downloadUrl: url,
+          sizeBytes: 0,
+          sizeFormatted: '—',
+          sender: 'Gmail',
+          subject: 'Correo',
+          date: new Date().toISOString()
+        });
+      }
+    });
+  });
+
+  return found;
+}
+
+// ── Merge into cache ─────────────────────────────────────────────────
+function mergeIntoCache(items) {
+  let newCount = 0;
+  items.forEach(item => {
+    const key = dedupKey(item.filename, item.sender);
+    if (!attachmentCache.has(key)) {
+      attachmentCache.set(key, {
+        id: `pudu_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        ...item
+      });
+      newCount++;
+    } else {
+      // Update fields if we got richer data (e.g., download URL or size)
+      const existing = attachmentCache.get(key);
+      if (item.downloadUrl && item.downloadUrl !== '#' && (!existing.downloadUrl || existing.downloadUrl === '#')) {
+        existing.downloadUrl = item.downloadUrl;
+      }
+      if (item.sizeBytes > 0 && existing.sizeBytes === 0) {
+        existing.sizeBytes = item.sizeBytes;
+        existing.sizeFormatted = item.sizeFormatted;
+      }
+      if (item.subject && item.subject !== 'Correo' && existing.subject === 'Correo') {
+        existing.subject = item.subject;
+      }
+    }
+  });
+  return newCount;
+}
+
+// ── Full scan (runs all strategies) ──────────────────────────────────
+function runFullScan() {
+  console.log('%c[Pudú Content v2] 🔍 Ejecutando escaneo completo…', 'color:#f59e0b;font-weight:bold');
+
+  const t0 = performance.now();
+
+  const fromEmail = extractFromOpenedEmail();
+  const fromList = extractFromListView();
+  const fromDeep = extractGenericDeepScan();
+
+  const newFromEmail = mergeIntoCache(fromEmail);
+  const newFromList = mergeIntoCache(fromList);
+  const newFromDeep = mergeIntoCache(fromDeep);
+
+  const elapsed = Math.round(performance.now() - t0);
+
+  console.log(
+    `%c[Pudú Content v2] ✅ Escaneo completo en ${elapsed}ms — ` +
+    `Email abierto: ${fromEmail.length} (${newFromEmail} nuevos), ` +
+    `Lista inbox: ${fromList.length} (${newFromList} nuevos), ` +
+    `Deep scan: ${fromDeep.length} (${newFromDeep} nuevos), ` +
+    `Total en caché: ${attachmentCache.size}`,
+    'color:#10b981;font-weight:bold'
+  );
+
+  return Array.from(attachmentCache.values());
+}
+
+// ── Auto-scroll to load more rows ────────────────────────────────────
+async function scrollAndCollect(maxScrolls = 8) {
+  console.log('%c[Pudú Content v2] 📜 Auto-scroll para cargar más correos…', 'color:#a855f7;');
+
+  const scrollContainer = document.querySelector('div.AO, div[role="main"], div.nH.oy8Mbf') || document.querySelector('.aeF');
+  if (!scrollContainer) {
+    console.log('[Pudú Content v2] No se encontró contenedor scrolleable');
+    return;
+  }
+
+  for (let i = 0; i < maxScrolls; i++) {
+    const prevSize = attachmentCache.size;
+    scrollContainer.scrollTop = scrollContainer.scrollTop + 600;
+    await sleep(400);
+    runFullScan();
+
+    if (attachmentCache.size === prevSize && i > 2) {
+      console.log(`[Pudú Content v2] Auto-scroll detenido (no hay nuevos datos) en paso ${i + 1}`);
+      break;
+    }
+  }
+
+  // Scroll back to top
+  scrollContainer.scrollTop = 0;
+}
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+// ── MutationObserver (persistent background scanning) ────────────────
+let observerActive = false;
+function startObserver() {
+  if (observerActive) return;
+  observerActive = true;
+
+  const observer = new MutationObserver(mutations => {
+    let hasRelevant = false;
+    for (const m of mutations) {
+      if (m.addedNodes.length > 0) {
+        for (const node of m.addedNodes) {
+          if (node.nodeType === 1) {
+            // Quick check: does this subtree contain anything attachment-related?
+            if (node.querySelector?.('[download_url], [aria-label], a[href*="view=att"]') ||
+                node.getAttribute?.('download_url') ||
+                (node.getAttribute?.('aria-label') && isLikelyFilename(node.getAttribute('aria-label')))) {
+              hasRelevant = true;
+              break;
+            }
+          }
+        }
+      }
+      if (hasRelevant) break;
+    }
+
+    if (hasRelevant) {
+      // Debounce: wait 300ms after last mutation batch
+      clearTimeout(observer._debounce);
+      observer._debounce = setTimeout(() => {
+        const newItems = runFullScan();
+        console.log(`[Pudú Content v2] 👁️ Observer detectó cambios — caché ahora: ${attachmentCache.size}`);
+      }, 300);
+    }
+  });
+
+  observer.observe(document.body, { childList: true, subtree: true });
+  console.log('%c[Pudú Content v2] 👁️ MutationObserver iniciado', 'color:#38bdf8;');
+}
+
+// ── Message handler (from background.js) ─────────────────────────────
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'EXTRACT_ATTACHMENTS') {
+    console.log('%c[Pudú Content v2] 📩 Solicitud de extracción recibida', 'color:#f59e0b;font-weight:bold;', request);
+
+    // Run a full scan immediately
+    const results = runFullScan();
+
+    // If we got very few results, try auto-scroll
+    if (results.length < 5 && request.autoScroll !== false) {
+      // Do async scroll+scan, then send updated results
+      scrollAndCollect(6).then(() => {
+        const finalResults = Array.from(attachmentCache.values());
+        console.log(`%c[Pudú Content v2] 🎯 Resultado final tras auto-scroll: ${finalResults.length} adjuntos`, 'color:#10b981;font-weight:bold;');
+        sendResponse({ success: true, count: finalResults.length, attachments: finalResults });
+      });
+      return true; // keep channel open for async
+    }
+
+    console.log(`%c[Pudú Content v2] 🎯 Resultado inmediato: ${results.length} adjuntos`, 'color:#10b981;font-weight:bold;');
+    sendResponse({ success: true, count: results.length, attachments: results });
+    return false;
+  }
+
+  if (request.action === 'GET_CACHE_SIZE') {
+    sendResponse({ count: attachmentCache.size });
+    return false;
+  }
+});
+
+// ── Initialization ───────────────────────────────────────────────────
+// Run initial scan after Gmail finishes loading
+function initialize() {
+  startObserver();
+  // Delay initial scan to let Gmail render
+  setTimeout(() => {
+    runFullScan();
+    console.log(`%c[Pudú Content v2] 🚀 Escaneo inicial completado — ${attachmentCache.size} adjuntos encontrados`, 'color:#10b981;font-weight:bold;');
+  }, 2000);
+}
+
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  initialize();
+} else {
+  document.addEventListener('DOMContentLoaded', initialize);
 }
