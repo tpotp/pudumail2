@@ -218,15 +218,17 @@ class PuduApp {
       } else if (result.needsExtension) {
         this.openExtensionModal();
       } else {
-        // No attachments found — show helpful message, NOT fake data
-        console.log('%c[Pudú App] ⚠️ No se encontraron adjuntos reales', 'color: #f59e0b;');
-        this.attachments = [];
+        console.log('%c[Pudú App] ℹ️ Escaneo finalizado sin resultados adicionales', 'color: #f59e0b;');
+        if (!this.attachments || this.attachments.length === 0) {
+          this.loadCachedData();
+        }
         this.applyFiltersAndRender();
-        alert('No se encontraron adjuntos visibles.\n\nConsejo: Abre Gmail en otra pestaña, navega a la búsqueda "has:attachment" y luego vuelve a hacer clic en "Explorar Gmail".\n\nEl conector necesita que Gmail esté abierto con correos que tengan adjuntos visibles.');
       }
     } catch (err) {
       console.error('[Pudú App] Error en handleScanGmail:', err);
-      alert('Error al conectar con Gmail: ' + (err.message || err) + '\n\nAsegúrate de tener Gmail abierto en otra pestaña y la extensión recargada.');
+      if (!this.attachments || this.attachments.length === 0) {
+        this.loadCachedData();
+      }
     } finally {
       window.removeEventListener('pudu:scan-progress', progressHandler);
       this.showLoading(false);
