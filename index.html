@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pudú Mail 2 - Explorador de Adjuntos de Gmail & Gestor de Disco</title>
+  <meta name="description" content="Pudú Mail 2 te permite ordenar tus adjuntos de Gmail por tamaño, liberar espacio en tu cuenta y moverlos a tu disco duro con total privacidad.">
+  <meta name="application-name" content="Pudú Mail 2">
+  
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Pudú Mail 2 - Explorador de Adjuntos de Gmail">
+  <meta property="og:description" content="Ordena adjuntos por tamaño, previsualiza y respalda tus archivos de Gmail a tu disco duro con 1 clic.">
+  <meta property="og:url" content="https://pudumail2.vercel.app">
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  
+  <!-- CSS Styles -->
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🦌</text></svg>">
+
+  <!-- JSZip for instant in-browser ZIP downloads -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body class="pudu-body">
+
+  <!-- Top Ribbon -->
+  <div class="top-accent-bar"></div>
+
+  <!-- Main Container -->
+  <div class="app-layout">
+    
+    <!-- Top Header -->
+    <header class="app-header">
+      <div class="header-brand">
+        <img src="assets/pudu_mascot.jpg" alt="Pudú Mail Mascot" class="brand-mascot">
+        <div class="brand-titles">
+          <div class="brand-row">
+            <h1>Pudú Mail 2</h1>
+            <span class="version-tag">v2.0 Web + Conector</span>
+          </div>
+          <p class="brand-tagline">Explorador de Archivos de Gmail & Gestor de Almacenamiento</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div id="extensionStatusBadge" class="status-badge disconnected">
+          <span>🧩</span> Conector Disponible
+        </div>
+        <button id="btnScanGmail" class="btn-primary">
+          <span>⚡</span> Explorar Gmail
+        </button>
+      </div>
+    </header>
+
+    <!-- TOP AD BANNER CONTAINER (Optimized for Google AdSense / Sponsor Banners) -->
+    <section class="ad-slot-container top-ad-slot">
+      <div class="ad-placeholder">
+        <span class="ad-label">PUBLICIDAD / ADSENSE</span>
+        <div class="ad-content-box">
+          <p>🌟 <strong>¿Sabías que puedes liberar hasta 10 GB de Gmail?</strong> Ordena tus archivos de mayor a menor y descárgalos a tu PC.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Storage Statistics Dashboard -->
+    <section class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon icon-storage">💾</div>
+        <div class="stat-data">
+          <span class="stat-label">Espacio en Adjuntos</span>
+          <h2 id="statTotalSize" class="stat-value">0 B</h2>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon icon-files">📁</div>
+        <div class="stat-data">
+          <span class="stat-label">Total de Archivos</span>
+          <h2 id="statTotalFiles" class="stat-value">0</h2>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon icon-heavy">🔥</div>
+        <div class="stat-data">
+          <span class="stat-label">Archivo Más Pesado</span>
+          <h2 id="statLargestFile" class="stat-value">0 B</h2>
+        </div>
+      </div>
+
+      <div class="stat-card stat-card-highlight">
+        <div class="stat-icon icon-selected">✅</div>
+        <div class="stat-data">
+          <span class="stat-label">Seleccionados</span>
+          <h2 id="statSelectedCount" class="stat-value">0</h2>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Workspace with Sidebar & Content -->
+    <div class="workspace-layout">
+      
+      <!-- Center Main Explorer -->
+      <main class="explorer-main">
+        
+        <!-- Filter & Action Toolbar -->
+        <div class="toolbar-card">
+          <div class="toolbar-top">
+            
+            <!-- Search Bar -->
+            <div class="search-box">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="searchInput" placeholder="Buscar por nombre de archivo, remitente o asunto..." autocomplete="off">
+            </div>
+
+            <!-- Size Filter -->
+            <div class="filter-group">
+              <label for="minSizeSelect">Filtrar por tamaño:</label>
+              <select id="minSizeSelect" class="pudu-select">
+                <option value="0">Todos los tamaños</option>
+                <option value="1048576">Mayores a 1 MB</option>
+                <option value="5242880">Mayores a 5 MB</option>
+                <option value="10485760">Mayores a 10 MB (Pesados)</option>
+                <option value="26214400">Mayores a 25 MB (Críticos)</option>
+              </select>
+            </div>
+
+            <!-- View Switcher -->
+            <div class="view-switcher">
+              <button id="btnViewTable" class="btn-icon active" title="Vista Tabla">☰</button>
+              <button id="btnViewGrid" class="btn-icon" title="Vista Cuadrícula">☷</button>
+            </div>
+          </div>
+
+          <!-- Category Chips -->
+          <div class="category-chips-row">
+            <button class="category-chip active" data-category="all">✨ Todos</button>
+            <button class="category-chip" data-category="pdf">📄 PDFs</button>
+            <button class="category-chip" data-category="image">🖼️ Fotos e Imágenes</button>
+            <button class="category-chip" data-category="video">🎥 Videos</button>
+            <button class="category-chip" data-category="archive">📦 Comprimidos (ZIP/RAR)</button>
+            <button class="category-chip" data-category="document">📝 Documentos</button>
+          </div>
+
+          <!-- Action Buttons Bar -->
+          <div class="action-bar-row">
+            <div class="action-left">
+              <button id="btnSelectAll" class="btn-secondary">Seleccionar Todo</button>
+            </div>
+            <div class="action-right">
+              <button id="btnDownloadZip" class="btn-secondary">
+                <span>📦</span> Descargar ZIP
+              </button>
+              <button id="btnMoveToDisk" class="btn-success">
+                <span>💾</span> Mover a Carpeta de mi PC
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Local File Dropzone Fallback (Zero Extension Mode) -->
+        <div id="localFileDropzone" class="dropzone-box">
+          <input type="file" id="localFileInput" class="hidden" accept=".mbox,.eml" multiple>
+          <div class="dropzone-content">
+            <span class="dropzone-icon">📥</span>
+            <div class="dropzone-text">
+              <strong>¿Tienes un archivo de Google Takeout (.mbox o .eml)?</strong>
+              <p>Arrastra aquí tus archivos de correo para explorarlos localmente al instante sin instalar nada.</p>
+            </div>
+            <button class="btn-secondary btn-sm" onclick="document.getElementById('localFileInput').click(); event.stopPropagation();">
+              Seleccionar Archivo
+            </button>
+          </div>
+        </div>
+
+        <!-- Explorer Container -->
+        <div id="attachmentsContainer" class="attachments-list-container">
+          <!-- Dynamic Table / Grid rendered by app.js -->
+        </div>
+
+        <!-- Empty State -->
+        <div id="emptyState" class="empty-state hidden">
+          <div class="empty-icon">🦌🔍</div>
+          <h3>No se encontraron adjuntos con los filtros seleccionados</h3>
+          <p>Prueba ajustando el tamaño mínimo o el término de búsqueda.</p>
+        </div>
+
+      </main>
+
+      <!-- SIDEBAR AD & PRO TIPS -->
+      <aside class="sidebar-layout">
+        
+        <!-- Sidebar AdSense Slot -->
+        <div class="ad-slot-container sidebar-ad-slot">
+          <div class="ad-placeholder">
+            <span class="ad-label">ANUNCIO / SPONSOR</span>
+            <div class="sidebar-ad-inner">
+              <h4>🚀 ¿Espacio de Google Lleno?</h4>
+              <p>Guarda tus adjuntos en tu disco duro y elimina correos pesados para no tener que pagar almacenamiento extra de Google One.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Tips Card -->
+        <div class="card-tips">
+          <h3>💡 Consejos de Uso</h3>
+          <ul class="tips-list">
+            <li><strong>Mover al disco:</strong> Usa el botón verde para elegir una carpeta de tu PC y guardar los adjuntos directamente.</li>
+            <li><strong>Vista Previa:</strong> Haz clic en el icono 👁️ para previsualizar fotos y documentos al instante.</li>
+            <li><strong>100% Privado:</strong> Tus correos y archivos se procesan en tu propio navegador.</li>
+          </ul>
+        </div>
+
+        <!-- Security & Legal Card -->
+        <div class="card-security">
+          <div class="security-badge">🔒 Privacidad Garantizada</div>
+          <p>Pudú Mail 2 no almacena tus datos en servidores externos. Funciona 100% de forma local.</p>
+          <div class="security-links">
+            <a href="privacy.html">Política de Privacidad</a> • 
+            <a href="terms.html">Condiciones</a>
+          </div>
+        </div>
+
+      </aside>
+
+    </div>
+
+    <!-- BOTTOM AD BANNER -->
+    <section class="ad-slot-container bottom-ad-slot">
+      <div class="ad-placeholder">
+        <span class="ad-label">ESPACIO PUBLICITARIO / ADSENSE BANNER</span>
+        <p>Pudú Mail 2 • Herramienta gratuita para gestionar y respaldar tus archivos de Gmail.</p>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>© 2026 Pudú Mail 2. Hecho con ❤️ para la productividad y el ahorro de espacio.</p>
+      <div class="footer-links">
+        <a href="privacy.html">Privacidad</a>
+        <a href="terms.html">Términos de Servicio</a>
+        <a href="https://github.com/tpotp/pudumail2" target="_blank">GitHub</a>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="loading-card">
+      <div class="pudu-loader-icon">🦌💨</div>
+      <h3 id="loadingProgressText">Procesando...</h3>
+      <div class="progress-bar-bg">
+        <div id="loadingProgressBar" class="progress-bar-fill" style="width: 20%;"></div>
+      </div>
+      <p class="loading-subtext">Esto ocurre 100% dentro de tu navegador.</p>
+    </div>
+  </div>
+
+  <!-- Preview Modal -->
+  <div id="previewModal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3 id="previewTitle">Vista Previa</h3>
+          <span id="previewSize" class="size-pill">0 B</span>
+        </div>
+        <button id="btnClosePreview" class="btn-close">✕</button>
+      </div>
+      <div id="previewContent" class="modal-body">
+        <!-- Content injected dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Extension 1-Click Install Modal -->
+  <div id="extensionModal" class="modal-overlay hidden">
+    <div class="modal-card modal-install">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3>🧩 Conector de 1 Clic para Pudú Mail</h3>
+          <span class="size-pill" style="background: #0284c7;">Gratis & Seguro</span>
+        </div>
+        <button class="btn-close" onclick="window.app.closeExtensionModal()">✕</button>
+      </div>
+      <div class="modal-body install-body">
+        <div class="install-steps">
+          <div class="step-item">
+            <span class="step-number">1</span>
+            <div class="step-desc">
+              <strong>Instala la extensión oficial</strong>
+              <p>El conector permite a Pudú Mail 2 comunicarse de forma privada con tu sesión de Gmail sin pedir contraseñas.</p>
+            </div>
+          </div>
+          <div class="step-item">
+            <span class="step-number">2</span>
+            <div class="step-desc">
+              <strong>Abre Gmail y disfruta del explorador</strong>
+              <p>Ordena todos tus adjuntos por tamaño y muévelos a tu disco duro con un solo clic.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="install-actions">
+          <a href="https://github.com/tpotp/pudumail2" target="_blank" class="btn-primary w-full">
+            <span>📥</span> Descargar Conector de Chrome
+          </a>
+          <button class="btn-secondary w-full" onclick="window.app.closeExtensionModal(); window.app.loadSampleData();" style="margin-top: 8px;">
+            Ver Demostración con Datos de Ejemplo
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- JavaScript Modules -->
+  <script src="js/formats.js"></script>
+  <script src="js/extension_bridge.js"></script>
+  <script src="js/mbox_parser.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

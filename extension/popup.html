@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pudú Mail Conector</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
+    body { width: 320px; background: #0f172a; color: #f8fafc; padding: 16px; border-radius: 12px; }
+    .header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; border-bottom: 1px solid #334155; padding-bottom: 12px; }
+    .logo { width: 38px; height: 38px; border-radius: 8px; object-fit: cover; }
+    .title h3 { font-size: 15px; font-weight: 700; color: #38bdf8; }
+    .title p { font-size: 11px; color: #94a3b8; }
+    .status-card { background: #1e293b; border-radius: 8px; padding: 12px; margin-bottom: 16px; border: 1px solid #334155; }
+    .status-indicator { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: #4ade80; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 8px #4ade80; }
+    .btn-main { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; background: linear-gradient(135deg, #0284c7, #2563eb); color: white; border: none; padding: 10px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; text-decoration: none; }
+    .btn-main:hover { background: linear-gradient(135deg, #0369a1, #1d4ed8); transform: translateY(-1px); }
+    .features { font-size: 11px; color: #94a3b8; margin-top: 14px; line-height: 1.5; }
+    .features li { list-style: none; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="icons/icon48.png" alt="Pudú Mail" class="logo">
+    <div class="title">
+      <h3>Pudú Mail 2</h3>
+      <p>Conector Privado de Adjuntos</p>
+    </div>
+  </div>
+
+  <div class="status-card">
+    <div class="status-indicator">
+      <span class="dot"></span>
+      <span>Conector Activo y Seguro</span>
+    </div>
+    <p style="font-size: 11px; color: #94a3b8; margin-top: 6px;">
+      Listo para comunicarse con la web de Pudú Mail 2 sin pedir claves ni contraseñas.
+    </p>
+  </div>
+
+  <a href="https://pudumail2.vercel.app" target="_blank" class="btn-main" id="btnOpenWeb">
+    <span>🚀 Abrir Explorador Web</span>
+  </a>
+
+  <ul class="features">
+    <li>✅ Ordenar adjuntos por tamaño (KB/MB/GB)</li>
+    <li>✅ Mover archivos a carpetas del disco</li>
+    <li>✅ 100% privado en tu navegador</li>
+  </ul>
+
+  <script src="popup.js"></script>
+</body>
+</html>

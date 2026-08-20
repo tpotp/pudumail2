@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "Pudú Mail - Conector de Adjuntos de Gmail",
+  "version": "1.0.0",
+  "description": "Conector oficial y privado para explorar, ordenar por tamaño y respaldar adjuntos de Gmail en Pudú Mail 2.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "downloads",
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://mail.google.com/*",
+    "https://*.googleusercontent.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://mail.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Pudú Mail Conector",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "externally_connectable": {
+    "matches": [
+      "https://pudumail2.vercel.app/*",
+      "https://*.vercel.app/*",
+      "http://localhost/*",
+      "http://127.0.0.1/*"
+    ]
+  }
+}
