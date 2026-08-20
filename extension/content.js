@@ -356,20 +356,32 @@ async function scrollAndPaginate(maxPages = 50) {
       break;
     }
 
+    // Guarda referencia de la primera fila para detectar cuando cambie la página
+    const firstRow = document.querySelector('tr.zA');
+    const firstRowId = firstRow ? firstRow.getAttribute('id') : '';
+    const firstRowText = firstRow ? firstRow.innerText : '';
+
     page++;
     console.log(`[Pudú v3] ➡️ Avanzando a página ${page}… (clic en "${nextBtn.getAttribute('aria-label')}")`);
     reportProgress(page, `Cargando página ${page}...`);
     nextBtn.click();
 
-    // Espera a que Gmail cargue la nueva página (detecta cambio en filas)
+    // Espera a que Gmail cargue la nueva página comprobando que la primera fila cambie
     let waited = 0;
-    while (waited < 4000) {
+    while (waited < 8000) {
       await sleep(300);
       waited += 300;
-      const rows = document.querySelectorAll('tr.zA');
-      if (rows.length > 0) break; // nueva página cargada
+      const currentFirstRow = document.querySelector('tr.zA');
+      if (currentFirstRow) {
+        const currentId = currentFirstRow.getAttribute('id');
+        const currentText = currentFirstRow.innerText;
+        if (currentId !== firstRowId || currentText !== firstRowText) {
+          console.log(`[Pudú v3] ✅ Nueva página detectada en ${waited}ms`);
+          break; // La página cambió
+        }
+      }
     }
-    await sleep(800); // margen extra para renderizado
+    await sleep(800); // margen extra para renderizado de chips e imágenes
 
     fullScan();
     console.log(`[Pudú v3] 📊 Página ${page}: ${attachmentCache.size - prevSize} nuevos, total: ${attachmentCache.size}`);
