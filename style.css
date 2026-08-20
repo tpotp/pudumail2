@@ -505,6 +505,16 @@ body.pudu-body {
   gap: 8px;
 }
 
+.trash-after-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+  color: var(--text-secondary, #64748b);
+  font-size: 12px;
+  cursor: pointer;
+}
+
 /* Dropzone */
 .dropzone-box {
   background: rgba(19, 27, 46, 0.4);
@@ -1215,4 +1225,3 @@ th.sort-asc::after {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.1); }
 }
-

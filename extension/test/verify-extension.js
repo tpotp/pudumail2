@@ -1,0 +1,21 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const root = path.resolve(__dirname, '..');
+const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const manifest = JSON.parse(read('manifest.json'));
+const source = [read('background.js'), read('content.js'), read('../js/extension_bridge.js'), read('../js/app.js')]
+  .join('\n')
+  .replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+
+assert.equal(manifest.permissions.includes('identity'), false);
+assert.equal(manifest.permissions.includes('cookies'), false);
+assert.equal(/gmail\.googleapis\.com|client_id|client_secret|access[_-]?token|refresh[_-]?token/i.test(source), false);
+assert.equal(/getSampleData|Contenido de \$\{item\.filename\}/.test(source), false);
+assert.match(read('background.js'), /RESOLVE_ATTACHMENT/);
+assert.match(read('background.js'), /waitForDownload/);
+assert.match(read('content.js'), /data-legacy-thread-id/);
+assert.match(read('content.js'), /TRASH_CONVERSATIONS/);
+assert.match(read('../js/app.js'), /confirm\(`Los adjuntos ya se guardaron/);
+console.log('Extension privacy and real-download checks passed.');

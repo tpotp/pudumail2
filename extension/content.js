@@ -79,8 +79,8 @@ function estimateSize(filename) {
   return Math.round(est[ext] || 1 * 1048576);
 }
 
-function dedupKey(filename, sender) {
-  return `${(filename || '').toLowerCase().trim()}|${(sender || '').toLowerCase().trim()}`;
+function dedupKey(filename, threadId) {
+  return `${threadId || ''}|${(filename || '').toLowerCase().trim()}`;
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -167,6 +167,7 @@ function scanListView() {
     const sender = extractSender(row);
     const subject = extractSubject(row);
     const date = extractDate(row);
+    const threadId = row.querySelector('[data-legacy-thread-id]')?.getAttribute('data-legacy-thread-id') || '';
 
     chips.forEach(chip => {
       let filename = chip.getAttribute('title') || '';
@@ -191,6 +192,7 @@ function scanListView() {
         sender,
         subject,
         date,
+        threadId,
       });
     });
   });
@@ -230,6 +232,7 @@ function scanOpenedEmail() {
     if (subjectEl) subject = subjectEl.innerText || '';
     const senderEl = document.querySelector('span[email], span.gD');
     if (senderEl) sender = senderEl.getAttribute('email') || senderEl.innerText || '';
+    const threadId = document.querySelector('[data-legacy-thread-id]')?.getAttribute('data-legacy-thread-id') || '';
 
     found.push({
       filename,
@@ -241,7 +244,8 @@ function scanOpenedEmail() {
       sizeEstimated: !sizeText,
       sender: sender || 'Gmail',
       subject: subject || 'Correo',
-      date: date || new Date().toISOString()
+      date: date || new Date().toISOString(),
+      threadId
     });
   });
 
@@ -252,7 +256,7 @@ function scanOpenedEmail() {
 function mergeIntoCache(items) {
   let newCount = 0;
   items.forEach(item => {
-    const key = dedupKey(item.filename, item.sender);
+    const key = dedupKey(item.filename, item.threadId);
     if (!attachmentCache.has(key)) {
       attachmentCache.set(key, {
         id: `pudu_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -279,6 +283,54 @@ function fullScan() {
   mergeIntoCache(fromList);
   mergeIntoCache(fromEmail);
   return Array.from(attachmentCache.values());
+}
+
+async function resolveAttachment(item) {
+  if (!item?.threadId || !item?.filename) {
+    throw new Error('No se encontró la conversación de este adjunto. Vuelve a explorar Gmail.');
+  }
+
+  const target = `#all/${item.threadId}`;
+  if (window.location.hash !== target) window.location.hash = target;
+
+  for (let attempt = 0; attempt < 60; attempt++) {
+    await sleep(350);
+    const match = scanOpenedEmail().find(found => found.filename === item.filename && found.downloadUrl !== '#');
+    if (match) return { ...item, ...match, sizeEstimated: match.sizeEstimated };
+  }
+  throw new Error(`No se pudo abrir ${item.filename} en Gmail.`);
+}
+
+function findTrashButton() {
+  const labels = ['papelera', 'eliminar', 'delete', 'trash'];
+  const matches = Array.from(document.querySelectorAll('[aria-label], [data-tooltip]')).filter(element => {
+    const label = `${element.getAttribute('aria-label') || ''} ${element.getAttribute('data-tooltip') || ''}`.toLowerCase();
+    return labels.some(word => label.includes(word)) && element.offsetParent !== null;
+  });
+  return matches.find(element => element.closest('[role="toolbar"]')) || null;
+}
+
+async function trashConversations(items) {
+  const threadIds = [...new Set((items || []).map(item => item.threadId).filter(Boolean))];
+  let trashed = 0;
+  const errors = [];
+  for (const threadId of threadIds) {
+    window.location.hash = `#all/${threadId}`;
+    let button = null;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      await sleep(250);
+      button = findTrashButton();
+      if (button) break;
+    }
+    if (!button) {
+      errors.push(`${threadId}: no se encontró el botón de papelera en Gmail.`);
+      continue;
+    }
+    robustClick(button);
+    trashed++;
+    await sleep(700);
+  }
+  return { trashed, errors };
 }
 
 function reportProgress(page, message) {
@@ -439,7 +491,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return;
       }
 
-      scrollAndPaginate(50).then(() => {
+      scrollAndPaginate(300).then(() => {
         const final = Array.from(attachmentCache.values());
         console.log(`%c[Pudú v4] 🎯 Enviando respuesta final con ${final.length} adjuntos`, 'color:#10b981;font-weight:bold');
         sendResponse({ success: true, count: final.length, attachments: final });
@@ -456,6 +508,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'GET_CACHE_SIZE') {
     sendResponse({ count: attachmentCache.size });
     return false;
+  }
+
+  if (request.action === 'RESOLVE_ATTACHMENT') {
+    resolveAttachment(request.item)
+      .then(attachment => sendResponse({ success: true, ...attachment }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  if (request.action === 'TRASH_CONVERSATIONS') {
+    trashConversations(request.items)
+      .then(result => sendResponse({ success: true, ...result }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
   }
 });
 

@@ -1,201 +1,132 @@
-/**
- * PUDÚ MAIL 2 — BACKGROUND SERVICE WORKER (v2)
- * Routes messages between pudumail2.vercel.app ↔ Gmail content script.
- * No fake data — only real attachments from Gmail DOM.
- */
+/* Routes only local extension messages. Gmail data never leaves the browser. */
+const EXTENSION_VERSION = '2.1.0';
+const GMAIL_SEARCH_URL = 'https://mail.google.com/mail/u/0/#search/has%3Aattachment';
 
-const EXTENSION_VERSION = "2.0.0";
-
-console.log(`%c[Pudú BG v${EXTENSION_VERSION}] Iniciado`, 'color:#10b981;font-weight:bold');
-
-// ── Unified message router ───────────────────────────────────────────
-function handleMessage(request, sender, sendResponse) {
-  if (!request || !request.action) {
-    sendResponse({ success: false, error: 'Sin acción' });
-    return false;
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (!request?.action) return;
+  if (request.action === 'PING' || request.action === 'CHECK_STATUS' || request.action === 'GET_STATUS') {
+    sendResponse({ success: true, installed: true, version: EXTENSION_VERSION, status: 'ready' });
+    return;
   }
+  if (request.action === 'SCAN_PROGRESS') return broadcastProgress(request, sendResponse);
+  if (request.action === 'SCAN_GMAIL_ATTACHMENTS') return respond(scanGmail(request.query), sendResponse);
+  if (request.action === 'RESOLVE_ATTACHMENT') return respond(resolveAttachment(request.item), sendResponse);
+  if (request.action === 'DOWNLOAD_ATTACHMENT') return respond(downloadAttachment(request.item || request), sendResponse);
+  if (request.action === 'BATCH_DOWNLOAD') return respond(downloadBatch(request.items), sendResponse);
+  if (request.action === 'TRASH_CONVERSATIONS') return respond(trashConversations(request.items), sendResponse);
+  sendResponse({ success: false, error: `Acción '${request.action}' no reconocida` });
+});
 
-  const action = request.action;
-  console.log(`%c[Pudú BG] 📩 ${action}`, 'color:#38bdf8;font-weight:bold', request);
-
-  switch (action) {
-    case 'PING':
-    case 'CHECK_STATUS':
-    case 'GET_STATUS':
-      sendResponse({ success: true, installed: true, version: EXTENSION_VERSION, status: 'ready' });
-      return false;
-
-    case 'SCAN_GMAIL_ATTACHMENTS':
-      handleScan(request, sendResponse);
-      return true; // async
-
-    case 'SCAN_PROGRESS':
-      // Broadcast to any pudumail web app tabs
-      chrome.tabs.query({}).then(tabs => {
-        tabs.forEach(t => {
-          if (t.url && (t.url.includes('vercel.app') || t.url.includes('localhost') || t.url.includes('127.0.0.1'))) {
-            chrome.tabs.sendMessage(t.id, request).catch(() => {});
-          }
-        });
-      });
-      sendResponse({ success: true });
-      return false;
-
-    case 'DOWNLOAD_ATTACHMENT':
-      handleDownload(request, sendResponse);
-      return true;
-
-    case 'BATCH_DOWNLOAD':
-      handleBatchDownload(request, sendResponse);
-      return true;
-
-    default:
-      sendResponse({ success: false, error: `Acción '${action}' no reconocida` });
-      return false;
-  }
+function respond(promise, sendResponse) {
+  promise.then(result => sendResponse({ success: true, ...result })).catch(error => sendResponse({ success: false, error: error.message }));
+  return true;
 }
 
-chrome.runtime.onMessage.addListener(handleMessage);
-chrome.runtime.onMessageExternal.addListener(handleMessage);
-
-// ── Scan Gmail ───────────────────────────────────────────────────────
-async function handleScan(request, sendResponse) {
-  try {
-    // 1. Find open Gmail tabs
-    const tabs = await chrome.tabs.query({ url: "*://mail.google.com/*" });
-    console.log(`[Pudú BG] Pestañas Gmail: ${tabs.length}`);
-
-    if (!tabs || tabs.length === 0) {
-      // Open a new Gmail tab with has:attachment search
-      console.log('[Pudú BG] Abriendo nueva pestaña Gmail con búsqueda de adjuntos...');
-      const newTab = await chrome.tabs.create({
-        url: "https://mail.google.com/mail/u/0/#search/has%3Aattachment",
-        active: false
-      });
-
-      // Wait for Gmail to fully load (SPAs take a while)
-      setTimeout(async () => {
-        try {
-          const results = await scanTab(newTab.id, request.query);
-          sendResponse({ success: true, attachments: results, count: results.length });
-        } catch (err) {
-          console.warn('[Pudú BG] Error en nueva pestaña:', err);
-          sendResponse({ success: true, attachments: [], count: 0, error: err.message });
-        }
-      }, 5000);
-      return;
+function broadcastProgress(request, sendResponse) {
+  chrome.tabs.query({}).then(tabs => tabs.forEach(tab => {
+    if (/^https:\/\/(pudumail2\.vercel\.app|[^/]+\.vercel\.app|localhost|127\.0\.0\.1)/.test(tab.url || '')) {
+      chrome.tabs.sendMessage(tab.id, request).catch(() => {});
     }
-
-    // 2. Use existing Gmail tab
-    const gmailTab = tabs[0];
-
-    // If the Gmail tab is on inbox, navigate to has:attachment search first
-    if (gmailTab.url && !gmailTab.url.includes('#search') && !gmailTab.url.includes('has%3Aattachment')) {
-      console.log('[Pudú BG] Navegando a búsqueda de adjuntos...');
-      await chrome.tabs.update(gmailTab.id, {
-        url: "https://mail.google.com/mail/u/0/#search/has%3Aattachment"
-      });
-      // Wait for navigation + render
-      setTimeout(async () => {
-        try {
-          const results = await scanTab(gmailTab.id, request.query);
-          sendResponse({ success: true, attachments: results, count: results.length });
-        } catch (err) {
-          sendResponse({ success: true, attachments: [], count: 0, error: err.message });
-        }
-      }, 4000);
-      return;
-    }
-
-    // Already on a search/attachment view — scan directly
-    try {
-      const results = await scanTab(gmailTab.id, request.query);
-      sendResponse({ success: true, attachments: results, count: results.length });
-    } catch (err) {
-      sendResponse({ success: true, attachments: [], count: 0, error: err.message });
-    }
-
-  } catch (error) {
-    console.error('[Pudú BG] Error general:', error);
-    sendResponse({ success: true, attachments: [], count: 0, error: error.message });
-  }
+  }));
+  sendResponse({ success: true });
 }
 
-// ── Execute scan inside a Gmail tab ──────────────────────────────────
-function scanTab(tabId, query) {
+async function getScanTab() {
+  const { scanTabId } = await chrome.storage.session.get('scanTabId');
+  if (scanTabId) {
+    try { return await chrome.tabs.get(scanTabId); } catch (_) { /* create a fresh worker tab */ }
+  }
+  const tab = await chrome.tabs.create({ url: GMAIL_SEARCH_URL, active: false });
+  await chrome.storage.session.set({ scanTabId: tab.id });
+  await new Promise(resolve => setTimeout(resolve, 2500));
+  return tab;
+}
+
+async function askGmail(action, payload = {}) {
+  const tab = await getScanTab();
+  let response;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const result = await new Promise(resolve => {
+      chrome.tabs.sendMessage(tab.id, { action, ...payload }, value => {
+        resolve(chrome.runtime.lastError ? null : value);
+      });
+    });
+    if (result) { response = result; break; }
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  if (!response) throw new Error('No se pudo conectar con Gmail. Actualiza la pestaña de Gmail e inténtalo otra vez.');
+  if (!response?.success) throw new Error(response?.error || 'Gmail no pudo resolver el adjunto.');
+  return response;
+}
+
+async function scanGmail(query) {
+  const tab = await getScanTab();
+  if (!tab.url?.includes('#search/has%3Aattachment')) {
+    await chrome.tabs.update(tab.id, { url: GMAIL_SEARCH_URL });
+    await new Promise(resolve => setTimeout(resolve, 1800));
+  }
+  const result = await askGmail('EXTRACT_ATTACHMENTS', { query: query || 'has:attachment' });
+  return { attachments: result.attachments || [], count: result.attachments?.length || 0 };
+}
+
+async function resolveAttachment(item) {
+  if (!item?.filename || !item?.threadId) throw new Error('Falta el identificador de Gmail para este adjunto. Vuelve a explorar Gmail.');
+  const result = await askGmail('RESOLVE_ATTACHMENT', { item });
+  if (!result.downloadUrl) throw new Error(`Gmail no entregó un enlace de descarga para ${item.filename}.`);
+  return { attachment: { ...item, ...result, downloadUrl: result.downloadUrl } };
+}
+
+async function downloadAttachment(item) {
+  const { attachment } = await resolveAttachment(item);
+  const downloadId = await chrome.downloads.download({
+    url: attachment.downloadUrl,
+    filename: `PuduMail_Adjuntos/${safeFilename(attachment.filename)}`,
+    saveAs: false,
+  });
+  await waitForDownload(downloadId);
+  return { downloadId, attachment };
+}
+
+async function downloadBatch(items = []) {
+  let downloaded = 0;
+  const errors = [];
+  const attachments = [];
+  for (const item of items) {
+    try { attachments.push((await downloadAttachment(item)).attachment); downloaded++; } catch (error) { errors.push(`${item.filename}: ${error.message}`); }
+  }
+  return { downloaded, total: items.length, attachments, errors };
+}
+
+function waitForDownload(downloadId) {
   return new Promise((resolve, reject) => {
-    // First attempt: send message to existing content script
-    chrome.tabs.sendMessage(tabId, { action: 'EXTRACT_ATTACHMENTS', query: query || 'has:attachment' }, response => {
-      if (chrome.runtime.lastError) {
-        console.log('[Pudú BG] Content script no responde, reinyectando…');
-        // Re-inject content.js
-        chrome.scripting.executeScript({
-          target: { tabId },
-          files: ['content.js']
-        }, () => {
-          if (chrome.runtime.lastError) {
-            console.warn('[Pudú BG] Error al inyectar:', chrome.runtime.lastError);
-            resolve([]);
-            return;
-          }
-          // Wait for content script to initialize and do its first scan
-          setTimeout(() => {
-            chrome.tabs.sendMessage(tabId, { action: 'EXTRACT_ATTACHMENTS', query: query || 'has:attachment' }, res => {
-              if (chrome.runtime.lastError) {
-                resolve([]);
-              } else {
-                resolve(res?.attachments || []);
-              }
-            });
-          }, 3000); // Give it 3s to initialize, run observer, and auto-scroll
-        });
-      } else {
-        resolve(response?.attachments || []);
-      }
+    let timeout;
+    const onChanged = delta => {
+      if (delta.id !== downloadId || !delta.state) return;
+      if (delta.state.current === 'complete') finish();
+      if (delta.state.current === 'interrupted') finish(new Error('La descarga fue interrumpida.'));
+    };
+    const finish = error => {
+      if (!timeout) return;
+      clearTimeout(timeout);
+      timeout = null;
+      chrome.downloads.onChanged.removeListener(onChanged);
+      error ? reject(error) : resolve();
+    };
+    chrome.downloads.onChanged.addListener(onChanged);
+    timeout = setTimeout(() => finish(new Error('La descarga no terminó a tiempo.')), 120000);
+    chrome.downloads.search({ id: downloadId }, downloads => {
+      const state = downloads[0]?.state;
+      if (state === 'complete') finish();
+      if (state === 'interrupted') finish(new Error('La descarga fue interrumpida.'));
     });
   });
 }
 
-// ── Download handlers ────────────────────────────────────────────────
-function handleDownload(request, sendResponse) {
-  const { url, filename } = request;
-  if (!url || url === '#') {
-    sendResponse({ success: false, error: 'URL no disponible para este adjunto' });
-    return;
-  }
-
-  chrome.downloads.download({
-    url: url,
-    filename: 'PuduMail_Adjuntos/' + (filename || 'adjunto'),
-    saveAs: false
-  }, downloadId => {
-    if (chrome.runtime.lastError) {
-      sendResponse({ success: false, error: chrome.runtime.lastError.message });
-    } else {
-      sendResponse({ success: true, downloadId });
-    }
-  });
+async function trashConversations(items = []) {
+  const result = await askGmail('TRASH_CONVERSATIONS', { items });
+  return { trashed: result.trashed || 0, errors: result.errors || [] };
 }
 
-async function handleBatchDownload(request, sendResponse) {
-  const items = request.items || [];
-  let ok = 0;
-
-  for (const item of items) {
-    if (!item.url || item.url === '#') continue;
-    try {
-      await new Promise(resolve => {
-        chrome.downloads.download({
-          url: item.url,
-          filename: 'PuduMail_Adjuntos/' + (item.filename || `archivo_${Date.now()}`),
-          saveAs: false
-        }, () => resolve());
-      });
-      ok++;
-    } catch (e) {
-      console.warn('[Pudú BG] Error descargando:', item.filename, e);
-    }
-  }
-
-  sendResponse({ success: true, total: items.length, downloaded: ok });
+function safeFilename(name) {
+  return String(name || 'adjunto').replace(/[\\/:*?"<>|]/g, '_');
 }

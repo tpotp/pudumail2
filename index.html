@@ -150,13 +150,16 @@
           <div class="action-bar-row">
             <div class="action-left">
               <button id="btnSelectAll" class="btn-secondary">Seleccionar Todo</button>
+              <label class="trash-after-save" title="Sólo se activa después de que cada descarga termine correctamente.">
+                <input type="checkbox" id="trashAfterSave"> Enviar correos a Papelera tras guardar
+              </label>
             </div>
             <div class="action-right">
               <button id="btnDownloadZip" class="btn-secondary">
                 <span>📦</span> Descargar ZIP
               </button>
               <button id="btnMoveToDisk" class="btn-success">
-                <span>💾</span> Mover a Carpeta de mi PC
+                <span>💾</span> Guardar en Carpeta de mi PC
               </button>
             </div>
           </div>
@@ -209,7 +212,7 @@
         <div class="card-tips">
           <h3>💡 Consejos de Uso</h3>
           <ul class="tips-list">
-            <li><strong>Mover al disco:</strong> Usa el botón verde para elegir una carpeta de tu PC y guardar los adjuntos directamente.</li>
+            <li><strong>Guardar al disco:</strong> Elige una carpeta de tu PC y guarda allí sólo los adjuntos seleccionados.</li>
             <li><strong>Vista Previa:</strong> Haz clic en el icono 👁️ para previsualizar fotos y documentos al instante.</li>
             <li><strong>100% Privado:</strong> Tus correos y archivos se procesan en tu propio navegador.</li>
           </ul>
@@ -309,9 +312,6 @@
           <a href="https://github.com/tpotp/pudumail2" target="_blank" class="btn-primary w-full">
             <span>📥</span> Descargar Conector de Chrome
           </a>
-          <button class="btn-secondary w-full" onclick="window.app.closeExtensionModal(); window.app.loadSampleData();" style="margin-top: 8px;">
-            Ver Demostración con Datos de Ejemplo
-          </button>
         </div>
       </div>
     </div>

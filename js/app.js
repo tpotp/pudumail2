@@ -37,6 +37,7 @@ class PuduApp {
     this.btnSortSize = document.getElementById('btnSortSize');
     this.btnScanGmail = document.getElementById('btnScanGmail');
     this.btnSelectAll = document.getElementById('btnSelectAll');
+    this.trashAfterSave = document.getElementById('trashAfterSave');
     this.btnMoveToDisk = document.getElementById('btnMoveToDisk');
     this.btnDownloadZip = document.getElementById('btnDownloadZip');
     this.btnViewTable = document.getElementById('btnViewTable');
@@ -219,80 +220,16 @@ class PuduApp {
         this.openExtensionModal();
       } else {
         console.log('%c[Pudú App] ℹ️ Escaneo finalizado sin resultados adicionales', 'color: #f59e0b;');
-        if (!this.attachments || this.attachments.length === 0) {
-          this.loadCachedData();
-        }
+        if (result.error) alert(result.error);
         this.applyFiltersAndRender();
       }
     } catch (err) {
       console.error('[Pudú App] Error en handleScanGmail:', err);
-      if (!this.attachments || this.attachments.length === 0) {
-        this.loadCachedData();
-      }
+      alert('No se pudo explorar Gmail. Confirma que el conector está activo y Gmail está abierto.');
     } finally {
       window.removeEventListener('pudu:scan-progress', progressHandler);
       this.showLoading(false);
     }
-  }
-
-  getSampleData() {
-    return [
-      {
-        id: 'sample_1',
-        filename: 'Memoria_Anual_2025_Final.pdf',
-        mimeType: 'application/pdf',
-        sizeBytes: 48.6 * 1024 * 1024,
-        sizeFormatted: '48.6 MB',
-        sender: 'directorio@empresa.com',
-        subject: 'Reporte Financiero y Memoria Anual Consolidada',
-        date: '2026-02-14T10:30:00Z',
-        downloadUrl: '#'
-      },
-      {
-        id: 'sample_2',
-        filename: 'Video_Presentacion_Lanzamiento.mp4',
-        mimeType: 'video/mp4',
-        sizeBytes: 124.2 * 1024 * 1024,
-        sizeFormatted: '124.2 MB',
-        sender: 'marketing@pudumail.com',
-        subject: 'Video en alta definición para campaña',
-        date: '2026-03-01T15:20:00Z',
-        downloadUrl: '#'
-      },
-      {
-        id: 'sample_3',
-        filename: 'Backup_Fotografias_Evento.zip',
-        mimeType: 'application/zip',
-        sizeBytes: 89.5 * 1024 * 1024,
-        sizeFormatted: '89.5 MB',
-        sender: 'fotografia@estudio.cl',
-        subject: 'Fotos en RAW del evento de cierre',
-        date: '2026-01-20T18:00:00Z',
-        downloadUrl: '#'
-      },
-      {
-        id: 'sample_4',
-        filename: 'Factura_Servicios_AWS_Cloud.pdf',
-        mimeType: 'application/pdf',
-        sizeBytes: 1.8 * 1024 * 1024,
-        sizeFormatted: '1.8 MB',
-        sender: 'invoicing@aws.amazon.com',
-        subject: 'Tu factura fiscal electrónica de Febrero',
-        date: '2026-02-28T08:10:00Z',
-        downloadUrl: '#'
-      },
-      {
-        id: 'sample_5',
-        filename: 'Infografia_Pudu_Mascota.png',
-        mimeType: 'image/png',
-        sizeBytes: 4.2 * 1024 * 1024,
-        sizeFormatted: '4.2 MB',
-        sender: 'diseno@pudumail.com',
-        subject: 'Ilustración oficial del Pudú en alta resolución',
-        date: '2026-03-10T12:00:00Z',
-        downloadUrl: 'assets/pudu_mascot.jpg'
-      }
-    ];
   }
 
   openExtensionModal() {
@@ -301,12 +238,6 @@ class PuduApp {
 
   closeExtensionModal() {
     if (this.extensionModal) this.extensionModal.classList.add('hidden');
-  }
-
-  loadSampleData() {
-    this.attachments = this.getSampleData();
-    this.saveCachedData();
-    this.applyFiltersAndRender();
   }
 
   async handleLocalFiles(files) {
@@ -624,29 +555,25 @@ class PuduApp {
       return;
     }
 
-    // Check File System Access API support
     if ('showDirectoryPicker' in window) {
       try {
         const dirHandle = await window.showDirectoryPicker();
         this.showLoading(true, `Guardando ${itemsToSave.length} archivos en tu carpeta...`);
 
         let savedCount = 0;
+        const savedItems = [];
         for (const item of itemsToSave) {
           try {
-            const fileHandle = await dirHandle.getFileHandle(item.filename, { create: true });
+            const attachment = await window.PuduBridge.resolveAttachment(item);
+            Object.assign(item, attachment);
+            const response = await fetch(attachment.downloadUrl, { credentials: 'omit' });
+            if (!response.ok) throw new Error(`Gmail devolvió ${response.status}`);
+            const fileHandle = await dirHandle.getFileHandle(this.safeFilename(item.filename), { create: true });
             const writable = await fileHandle.createWritable();
-
-            if (item.blob) {
-              await writable.write(item.blob);
-            } else {
-              // Fetch or fallback simulated content
-              const response = await fetch(item.downloadUrl || 'assets/pudu_mascot.jpg');
-              const blob = await response.blob();
-              await writable.write(blob);
-            }
-
+            await writable.write(await response.blob());
             await writable.close();
             savedCount++;
+            savedItems.push(item);
             if (this.progressBar) {
               this.progressBar.style.width = `${Math.round((savedCount / itemsToSave.length) * 100)}%`;
             }
@@ -655,18 +582,18 @@ class PuduApp {
           }
         }
 
+        if (savedItems.length) await this.maybeTrashSavedConversations(savedItems);
         this.showLoading(false);
-        alert(`🎉 ¡Éxito! Se guardaron ${savedCount} archivos directamente en tu disco.`);
+        alert(savedCount ? `🎉 Se guardaron ${savedCount} archivos reales en tu carpeta.` : 'Gmail no permitió guardar los archivos seleccionados.');
       } catch (err) {
         if (err.name !== 'AbortError') {
           console.error('Error con DirectoryPicker:', err);
-          this.handleDownloadZip();
+          await this.downloadWithExtension(itemsToSave);
         }
         this.showLoading(false);
       }
     } else {
-      // Fallback for browsers without showDirectoryPicker: ZIP Download
-      this.handleDownloadZip();
+      await this.downloadWithExtension(itemsToSave);
     }
   }
 
@@ -688,53 +615,73 @@ class PuduApp {
       return;
     }
 
-    this.showLoading(true, 'Generando archivo ZIP comprimido...');
+    this.showLoading(true, 'Preparando adjuntos reales para ZIP...');
     const zip = new JSZip();
 
-    for (const item of itemsToSave) {
-      if (item.blob) {
-        zip.file(item.filename, item.blob);
-      } else {
-        try {
-          const resp = await fetch(item.downloadUrl || 'assets/pudu_mascot.jpg');
-          const blob = await resp.blob();
-          zip.file(item.filename, blob);
-        } catch (e) {
-          zip.file(item.filename + '.txt', `Contenido del adjunto: ${item.filename} de ${item.sender}`);
-        }
+    try {
+      for (const item of itemsToSave) {
+        const attachment = await window.PuduBridge.resolveAttachment(item);
+        Object.assign(item, attachment);
+        const resp = await fetch(attachment.downloadUrl, { credentials: 'omit' });
+        if (!resp.ok) throw new Error(`Gmail devolvió ${resp.status}`);
+        zip.file(this.safeFilename(item.filename), await resp.blob());
       }
-    }
 
-    const content = await zip.generateAsync({ type: 'blob' });
-    const url = URL.createObjectURL(content);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `PuduMail_Adjuntos_${new Date().toISOString().slice(0, 10)}.zip`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-
-    this.showLoading(false);
-  }
-
-  downloadSingle(item) {
-    if (item.downloadUrl && item.downloadUrl !== '#') {
-      window.PuduBridge.downloadFile(item.downloadUrl, item.filename);
-    } else {
-      // Download blob
-      const blob = item.blob || new Blob([`Contenido de ${item.filename}`], { type: item.mimeType });
-      const url = URL.createObjectURL(blob);
+      const content = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(content);
       const a = document.createElement('a');
       a.href = url;
-      a.download = item.filename;
+      a.download = `PuduMail_Adjuntos_${new Date().toISOString().slice(0, 10)}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('No se pudo crear el ZIP:', error);
+      await this.downloadWithExtension(itemsToSave);
+    } finally {
+      this.showLoading(false);
     }
   }
 
-  openPreviewModal(item) {
+  async downloadWithExtension(items) {
+    this.showLoading(true, 'Guardando adjuntos reales en Descargas/PuduMail_Adjuntos...');
+    try {
+      const result = await window.PuduBridge.downloadAttachments(items);
+      if (result.attachments?.length) await this.maybeTrashSavedConversations(result.attachments);
+      alert(result.downloaded ? `Se enviaron ${result.downloaded} archivos reales a Descargas/PuduMail_Adjuntos.` : 'No se pudo descargar ningún archivo.');
+    } catch (error) {
+      alert(error.message || 'No se pudieron descargar los adjuntos.');
+    } finally {
+      this.showLoading(false);
+    }
+  }
+
+  async downloadSingle(item) {
+    await this.downloadWithExtension([item]);
+  }
+
+  async maybeTrashSavedConversations(items) {
+    if (!this.trashAfterSave?.checked || !items.length) return;
+    const conversations = new Set(items.map(item => item.threadId).filter(Boolean)).size;
+    if (!conversations || !confirm(`Los adjuntos ya se guardaron. ¿Enviar ${conversations} conversación(es) a la Papelera de Gmail?`)) return;
+    try {
+      const response = await window.PuduBridge.request('TRASH_CONVERSATIONS', { items });
+      if (!response.success) throw new Error(response.error || 'No se pudieron enviar las conversaciones a la Papelera.');
+      if (response.errors?.length) console.warn('Papelera parcial:', response.errors);
+    } catch (error) {
+      alert(`Los archivos ya se guardaron, pero Gmail no movió los correos a la Papelera: ${error.message}`);
+    }
+  }
+
+  async openPreviewModal(item) {
     if (!this.previewModal) return;
+    if (!item.downloadUrl || item.downloadUrl === '#') {
+      this.showLoading(true, `Preparando ${item.filename}...`);
+      try { Object.assign(item, await window.PuduBridge.resolveAttachment(item)); }
+      catch (error) { alert(error.message || 'No se pudo preparar la vista previa.'); return; }
+      finally { this.showLoading(false); }
+    }
     this.previewTitle.innerText = item.filename;
     this.previewSize.innerText = item.sizeBytes > 0 ? PuduFormats.formatBytes(item.sizeBytes) : '—';
 
@@ -795,6 +742,10 @@ class PuduApp {
     if (this.previewModal) this.previewModal.classList.add('hidden');
   }
 
+  safeFilename(name) {
+    return String(name || 'adjunto').replace(/[\\/:*?"<>|]/g, '_');
+  }
+
   showLoading(show, text = 'Cargando...', pct = null) {
     if (!this.loadingOverlay) return;
     if (show) {
@@ -821,7 +772,9 @@ class PuduApp {
         sender: a.sender,
         subject: a.subject,
         date: a.date,
-        downloadUrl: a.downloadUrl && !a.downloadUrl.startsWith('blob:') ? a.downloadUrl : '#'
+        threadId: a.threadId,
+        // Gmail links expire quickly; retain only local metadata and resolve again on demand.
+        downloadUrl: '#'
       }));
       localStorage.setItem('pudumail2_cached_attachments', JSON.stringify(meta));
     } catch (e) {}
@@ -831,10 +784,12 @@ class PuduApp {
     try {
       const stored = localStorage.getItem('pudumail2_cached_attachments');
       if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed && parsed.length > 0) {
+        const parsed = JSON.parse(stored).filter(item => !String(item.id || '').startsWith('sample_'));
+        if (parsed.length > 0) {
           this.attachments = parsed;
           this.applyFiltersAndRender();
+        } else {
+          localStorage.removeItem('pudumail2_cached_attachments');
         }
       }
     } catch (e) {}

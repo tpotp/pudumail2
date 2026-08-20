@@ -23,7 +23,7 @@ class ExtensionBridge {
 
     // 3. Listen to postMessage PONG
     window.addEventListener('message', (event) => {
-      if (event.data && event.data.source === 'pudu-extension') {
+      if (event.source === window && event.origin === window.location.origin && event.data && event.data.source === 'pudu-extension') {
         console.log('%c[Pudú Bridge Web] 📬 Mensaje postMessage recibido de extensión:', 'color: #a855f7;', event.data);
         if (event.data.action === 'PONG' || event.data.installed) {
           this.setInstalled(true);
@@ -58,7 +58,7 @@ class ExtensionBridge {
   ping() {
     this.checkDomMarker();
     console.log('%c[Pudú Bridge Web] 📡 Enviando PING a la ventana...', 'color: #94a3b8;');
-    window.postMessage({ source: 'pudu-web', action: 'PING' }, '*');
+    window.postMessage({ source: 'pudu-web', action: 'PING' }, window.location.origin);
   }
 
   async detectExtension() {
@@ -78,7 +78,7 @@ class ExtensionBridge {
       let resolved = false;
 
       const responseHandler = (event) => {
-        if (!event.data || event.data.source !== 'pudu-extension') return;
+        if (event.source !== window || event.origin !== window.location.origin || !event.data || event.data.source !== 'pudu-extension') return;
 
         if (event.data.action === 'SCAN_PROGRESS') {
           console.log('%c[Pudú Bridge Web] 📊 Progreso del escaneo:', 'color: #38bdf8;', event.data.message);
@@ -107,9 +107,9 @@ class ExtensionBridge {
         source: 'pudu-web',
         action: 'SCAN_GMAIL_ATTACHMENTS',
         query: query
-      }, '*');
+      }, window.location.origin);
 
-      // Safety timeout: 120s to allow deep auto-scroll and pagination scanning
+      // Gmail can have hundreds of result pages; the extension reports progress while it scans.
       setTimeout(() => {
         if (!resolved) {
           console.warn('%c[Pudú Bridge Web] ⏱️ Timeout de espera de escaneo alcanzado (120s).', 'color: #ef4444;');
@@ -122,39 +122,48 @@ class ExtensionBridge {
               error: 'Conector no detectado. Abre Gmail e instala la extensión.'
             });
           } else {
-            // Extension is connected, return simulated or fallback scan
-            resolve({
-              success: true,
-              isFallback: true,
-              attachments: window.app ? window.app.getSampleData() : []
-            });
+            resolve({ success: false, error: 'El conector tardó demasiado. Abre Gmail y vuelve a intentarlo.' });
           }
         }
-      }, 120000);
+      }, 240000);
     });
   }
 
   /**
    * Download single file
    */
-  async downloadFile(url, filename) {
-    console.log('%c[Pudú Bridge Web] ⬇️ Descargando:', 'color: #38bdf8;', filename);
-    window.postMessage({
-      source: 'pudu-web',
-      action: 'DOWNLOAD_ATTACHMENT',
-      url: url,
-      filename: filename
-    }, '*');
+  request(action, payload = {}) {
+    return new Promise(resolve => {
+      const responseAction = `${action}_RESPONSE`;
+      const handler = event => {
+        if (event.source !== window || event.origin !== window.location.origin || event.data?.source !== 'pudu-extension' || event.data.action !== responseAction) return;
+        window.removeEventListener('message', handler);
+        resolve(event.data);
+      };
+      window.addEventListener('message', handler);
+      window.postMessage({ source: 'pudu-web', action, ...payload }, window.location.origin);
+      setTimeout(() => {
+        window.removeEventListener('message', handler);
+        resolve({ success: false, error: 'El conector no respondió.' });
+      }, 30000);
+    });
+  }
 
-    try {
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    } catch (e) {}
-    return true;
+  async resolveAttachment(item) {
+    const response = await this.request('RESOLVE_ATTACHMENT', { item });
+    return response.success ? response.attachment : Promise.reject(new Error(response.error || 'No se pudo preparar el adjunto.'));
+  }
+
+  async downloadAttachment(item) {
+    const response = await this.request('DOWNLOAD_ATTACHMENT', { item });
+    if (!response.success) throw new Error(response.error || 'No se pudo descargar el adjunto.');
+    return response;
+  }
+
+  async downloadAttachments(items) {
+    const response = await this.request('BATCH_DOWNLOAD', { items });
+    if (!response.success) throw new Error(response.error || 'No se pudieron descargar los adjuntos.');
+    return response;
   }
 }
 

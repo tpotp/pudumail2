@@ -5,6 +5,10 @@
 
 console.log('%c[Pudú Web Bridge] 🚀 Content Script inyectado con éxito en:', 'color: #10b981; font-weight: bold;', window.location.href);
 
+function isAllowedOrigin(origin) {
+  return origin === 'https://pudumail2.vercel.app' || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+}
+
 // 1. Set global marker attribute on DOM
 document.documentElement.setAttribute('data-pudu-connector', 'ready');
 window.__PUDU_CONNECTOR_INSTALLED__ = true;
@@ -16,11 +20,11 @@ function announceReady() {
     source: 'pudu-extension',
     action: 'PONG',
     installed: true,
-    version: '2.0.0'
-  }, '*');
+    version: '2.1.0'
+  }, window.location.origin);
 
   window.dispatchEvent(new CustomEvent('pudu:extension-ready', {
-    detail: { installed: true, version: '2.0.0' }
+    detail: { installed: true, version: '2.1.0' }
   }));
 }
 
@@ -30,9 +34,9 @@ setTimeout(announceReady, 500);
 
 // 3. Relay messages between Web App and Background Worker
 window.addEventListener('message', (event) => {
-  if (!event.data || event.data.source !== 'pudu-web') return;
+  if (event.source !== window || !isAllowedOrigin(event.origin) || !event.data || event.data.source !== 'pudu-web') return;
 
-  const { action, query } = event.data;
+  const { action } = event.data;
   console.log('%c[Pudú Web Bridge] 📥 Mensaje recibido desde la página web:', 'color: #f59e0b; font-weight: bold;', event.data);
 
   if (action === 'PING') {
@@ -53,7 +57,7 @@ window.addEventListener('message', (event) => {
       success: !error && (response?.success ?? true),
       ...(response || {}),
       error: error ? error.message : response?.error
-    }, '*');
+    }, event.origin);
   });
 });
 
@@ -64,6 +68,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       source: 'pudu-extension',
       action: 'SCAN_PROGRESS',
       ...request
-    }, '*');
+    }, window.location.origin);
   }
 });

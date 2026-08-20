@@ -11,6 +11,10 @@
 - 📥 **Modo Drag & Drop Local:** Soporte para archivos `.mbox` y `.eml` de Google Takeout sin requerir ninguna extensión.
 - 💰 **Monetización lista:** Espacios optimizados para anuncios de Google AdSense o patrocinadores.
 
+## Privacidad del conector
+
+La extensión sólo lee la interfaz ya abierta de Gmail y resuelve la descarga del adjunto cuando la persona la solicita. No usa Gmail API, Google OAuth, `client_id`, tokens ni un servidor que almacene correo. Las URLs de descarga son temporales y no se guardan; los metadatos se conservan sólo en el navegador para volver a resolverlos al descargar.
+
 ---
 
 ## 🚀 Estructura del Proyecto
