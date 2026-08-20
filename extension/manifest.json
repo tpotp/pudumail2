@@ -11,14 +11,7 @@
   "permissions": [
     "downloads",
     "storage",
-    "activeTab",
-    "tabs",
-    "scripting",
     "identity"
-  ],
-  "host_permissions": [
-    "https://mail.google.com/*",
-    "https://*.googleusercontent.com/*"
   ],
   "background": {
     "service_worker": "background.js"
