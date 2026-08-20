@@ -398,20 +398,43 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'EXTRACT_ATTACHMENTS') {
     console.log('%c[Pudú v3] 📩 EXTRACT_ATTACHMENTS recibido', 'color:#f59e0b;font-weight:bold');
 
-    if (request.autoScroll === false) {
-      // Modo rápido sin scroll
-      const results = fullScan();
-      sendResponse({ success: true, count: results.length, attachments: results });
-      return false;
-    }
+    // Smart wait for Gmail to render the rows
+    const waitForRows = async (maxAttempts = 40) => { // 40 * 500ms = 20 seconds max
+      console.log(`[Pudú v3] ⏳ Esperando que Gmail cargue los correos...`);
+      for (let i = 0; i < maxAttempts; i++) {
+        const rows = document.querySelectorAll('tr.zA');
+        if (rows.length > 0) {
+          console.log(`[Pudú v3] ✅ Correos cargados en DOM después de ${i * 500}ms`);
+          return true;
+        }
+        await sleep(500);
+      }
+      return false; // Timeout
+    };
 
-    // Modo completo con paginación
-    scrollAndPaginate(50).then(() => {
-      const final = Array.from(attachmentCache.values());
-      console.log(`%c[Pudú v3] 🎯 FINAL: ${final.length} adjuntos`, 'color:#10b981;font-weight:bold');
-      sendResponse({ success: true, count: final.length, attachments: final });
+    waitForRows().then((loaded) => {
+      if (!loaded) {
+        console.warn(`[Pudú v3] ⏰ Timeout esperando a que Gmail cargue la bandeja.`);
+        sendResponse({ success: true, count: 0, attachments: [] });
+        return;
+      }
+
+      if (request.autoScroll === false) {
+        // Modo rápido sin scroll
+        const results = fullScan();
+        sendResponse({ success: true, count: results.length, attachments: results });
+        return;
+      }
+
+      // Modo completo con paginación
+      scrollAndPaginate(50).then(() => {
+        const final = Array.from(attachmentCache.values());
+        console.log(`%c[Pudú v3] 🎯 FINAL: ${final.length} adjuntos`, 'color:#10b981;font-weight:bold');
+        sendResponse({ success: true, count: final.length, attachments: final });
+      });
     });
-    return true;
+
+    return true; // async
   }
 
   if (request.action === 'GET_CACHE_SIZE') {
