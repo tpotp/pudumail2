@@ -146,43 +146,6 @@ class ExtensionBridge {
     } catch (e) {}
     return true;
   }
-
-  /**
-   * Request OAuth Auth Token from the extension
-   */
-  async getAuthToken() {
-    console.log('%c[Pudú Bridge Web] 🔐 Solicitando Auth Token a la extensión...', 'color: #38bdf8; font-weight: bold;');
-    this.checkDomMarker();
-
-    return new Promise((resolve) => {
-      let resolved = false;
-      const responseHandler = (event) => {
-        if (event.data && event.data.source === 'pudu-extension' && event.data.action === 'GET_AUTH_TOKEN_RESPONSE') {
-          console.log('%c[Pudú Bridge Web] 🔑 Respuesta de Token recibida.', 'color: #10b981; font-weight: bold;');
-          window.removeEventListener('message', responseHandler);
-          resolved = true;
-          if (event.data.success && event.data.token) {
-            resolve({ success: true, token: event.data.token });
-          } else {
-            resolve({ success: false, error: event.data.error || 'Error al obtener token' });
-          }
-        }
-      };
-
-      window.addEventListener('message', responseHandler);
-      window.postMessage({
-        source: 'pudu-web',
-        action: 'GET_AUTH_TOKEN'
-      }, '*');
-
-      setTimeout(() => {
-        if (!resolved) {
-          window.removeEventListener('message', responseHandler);
-          resolve({ success: false, error: 'Timeout esperando el token' });
-        }
-      }, 60000); // 1 minute timeout for OAuth popup
-    });
-  }
 }
 
 window.PuduBridge = new ExtensionBridge();
