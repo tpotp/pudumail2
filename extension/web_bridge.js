@@ -20,11 +20,11 @@ function announceReady() {
     source: 'pudu-extension',
     action: 'PONG',
     installed: true,
-    version: '2.5.0'
+    version: '2.6.0'
   }, window.location.origin);
 
   window.dispatchEvent(new CustomEvent('pudu:extension-ready', {
-    detail: { installed: true, version: '2.5.0' }
+    detail: { installed: true, version: '2.6.0' }
   }));
 }
 

@@ -1,5 +1,5 @@
 /* Gmail stays in a private worker tab; no mail data leaves this browser. */
-const EXTENSION_VERSION = '2.5.0';
+const EXTENSION_VERSION = '2.6.0';
 const GMAIL_SEARCH_URL = 'https://mail.google.com/mail/u/0/#search/has%3Aattachment';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 let dashboardTabId = null;
@@ -119,24 +119,30 @@ async function scanGmail(query, continuing = false) {
 
 async function resolveAttachment(item) {
   if (!item?.filename) throw new Error('Falta el nombre del archivo adjunto.');
-  if (item.downloadUrl && item.downloadUrl !== '#' && item.downloadUrl.startsWith('http')) {
+  
+  // Only use existing URL if it's already verified with disp=attd and not a dummy hash
+  if (item.downloadUrl && item.downloadUrl !== '#' && item.downloadUrl.startsWith('http') && item.downloadUrl.includes('disp=attd')) {
     return { attachment: item };
   }
+
   const result = await askGmail('RESOLVE_ATTACHMENT', { item });
-  if (!result.downloadUrl || result.downloadUrl === '#') {
-    throw new Error(`Gmail no entregó un enlace de descarga para ${item.filename}.`);
+  if (!result.downloadUrl || result.downloadUrl === '#' || !result.downloadUrl.startsWith('http')) {
+    throw new Error(`Gmail no entregó un enlace de descarga válido para ${item.filename}.`);
   }
   return { attachment: { ...item, ...result, downloadUrl: result.downloadUrl } };
 }
 
 async function downloadAttachment(item) {
   const { attachment } = await resolveAttachment(item);
+  const cleanName = safeFilename(attachment.filename || item.filename);
+  
   const downloadId = await chrome.downloads.download({
     url: attachment.downloadUrl,
-    filename: `PuduMail_Adjuntos/${safeFilename(attachment.filename)}`,
+    filename: `PuduMail_Adjuntos/${cleanName}`,
     saveAs: false,
+    conflictAction: 'uniquify'
   });
-  const verification = await waitForDownload(downloadId);
+  const verification = await waitForDownload(downloadId, cleanName);
   return { downloadId, attachment, verification };
 }
 
@@ -179,7 +185,7 @@ async function downloadBatch(items = []) {
   };
 }
 
-function waitForDownload(downloadId) {
+function waitForDownload(downloadId, expectedFilename) {
   return new Promise((resolve, reject) => {
     let timeout;
     const finish = (error, item) => {
@@ -193,12 +199,21 @@ function waitForDownload(downloadId) {
     const onChanged = delta => {
       if (delta.id !== downloadId || !delta.state) return;
       if (delta.state.current === 'complete') inspect();
-      if (delta.state.current === 'interrupted') finish(new Error('La descarga fue interrumpida.'));
+      if (delta.state.current === 'interrupted') finish(new Error('La descarga fue interrumpida en Chrome.'));
     };
 
     const inspect = () => chrome.downloads.search({ id: downloadId }, downloads => {
       const item = downloads ? downloads[0] : null;
       if (item?.state === 'complete') {
+        // Check if Chrome downloaded an HTML error page instead of binary content
+        const isHtml = item.mime === 'text/html' || String(item.filename || '').endsWith('.htm') || String(item.filename || '').endsWith('.html');
+        const expectsHtml = String(expectedFilename || '').toLowerCase().endsWith('.html') || String(expectedFilename || '').toLowerCase().endsWith('.htm');
+        
+        if (isHtml && !expectsHtml) {
+          finish(new Error('El archivo no estaba disponible en Gmail (servidor devolvió página de error).'));
+          return;
+        }
+
         finish(null, {
           exists: item.exists !== false,
           fileSize: item.fileSize || item.totalBytes || 0,
@@ -211,7 +226,6 @@ function waitForDownload(downloadId) {
 
     chrome.downloads.onChanged.addListener(onChanged);
     timeout = setTimeout(() => {
-      // Check one last time before timing out
       chrome.downloads.search({ id: downloadId }, downloads => {
         const item = downloads ? downloads[0] : null;
         if (item?.state === 'complete') {

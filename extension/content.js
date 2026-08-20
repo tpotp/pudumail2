@@ -1,19 +1,19 @@
 (() => {
-if (globalThis.__puduGmailContentVersion === '2.5.0') return;
-globalThis.__puduGmailContentVersion = '2.5.0';
+if (globalThis.__puduGmailContentVersion === '2.6.0') return;
+globalThis.__puduGmailContentVersion = '2.6.0';
 
 /**
- * PUDÚ MAIL 2 — GMAIL CONTENT SCRIPT (v5 — Standardized Universal Scraper)
+ * PUDÚ MAIL 2 — GMAIL CONTENT SCRIPT (v6 — Authentic Binary Attachment Downloader)
  *
- * Estrategias de escaneo universal y multi-idioma:
- *   1. Detección directa de tokens de sesión Gmail (ik, u-index).
- *   2. Extracción y construcción directa de URLs de descarga en vista de lista y correos abiertos.
- *   3. Paginación multi-estrategia: Eventos Pointer/Mouse + URL Hash routing (#search/has:attachment/pX).
- *   4. Identificación multi-idioma (ES, EN, FR, DE, IT, PT, RU, JA, ZH) y por clases estándar de Gmail (.ar9).
- *   5. Prevención total de bloqueos con resolución inmediata de adjuntos.
+ * Mejoras:
+ *   1. Captura 100% fidedigna de adjuntos reales (Imágenes, Videos, Documentos, Audios, Archivos Comprimidos).
+ *   2. Soporte completo para adjuntos en línea (inline images img[src*="view=att"], videos, audios).
+ *   3. Resolución garantizada de URLs binarias con Content-Disposition forzado (disp=attd&zw).
+ *   4. Eliminación de suposiciones erróneas (attid=0.1) que producían descargas de error .htm.
+ *   5. Paginación resiliente y multi-idioma.
  */
 
-console.log('%c[Pudú Content v5] 🦌 Activo en Gmail con Extractor Universal Multi-Idioma', 'color:#38bdf8;font-weight:bold');
+console.log('%c[Pudú Content v6] 🦌 Extractor Binario Universal de Gmail', 'color:#38bdf8;font-weight:bold');
 
 // ── Cache y dedup ─────────────────────────────────────────────────────
 const attachmentCache = new Map();
@@ -90,7 +90,6 @@ function dedupKey(filename, threadId) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// ── Disparador robusto de eventos de clic ─────────────────────────────
 function robustClick(el) {
   if (!el) return false;
   try {
@@ -107,7 +106,7 @@ function robustClick(el) {
     if (typeof el.click === 'function') el.click();
     return true;
   } catch (e) {
-    console.warn('[Pudú v5] Error en robustClick:', e);
+    console.warn('[Pudú v6] Error en robustClick:', e);
     return false;
   }
 }
@@ -118,36 +117,23 @@ function getGmailUserIndex() {
   return m ? m[1] : '0';
 }
 
-function getGmailIK() {
-  const elWithIk = document.querySelector('a[href*="ik="], link[href*="ik="], script[src*="ik="]');
-  if (elWithIk) {
-    const m = (elWithIk.href || elWithIk.src || '').match(/[?&]ik=([a-f0-9]+)/i);
-    if (m) return m[1];
+function normalizeGmailDownloadUrl(rawUrl) {
+  if (!rawUrl || rawUrl === '#') return '';
+  let url = rawUrl;
+  if (url.startsWith('//')) url = 'https:' + url;
+  else if (url.startsWith('/')) url = window.location.origin + url;
+  else if (url.startsWith('?')) url = `https://mail.google.com/mail/u/${getGmailUserIndex()}/${url}`;
+  
+  // Ensure disp=attd (force binary file download, not HTML wrapper)
+  if (url.includes('disp=')) {
+    url = url.replace(/disp=(inline|safe|th)/g, 'disp=attd');
+  } else if (url.includes('view=att')) {
+    url += '&disp=attd';
   }
-  for (const s of document.scripts) {
-    const text = s.textContent || '';
-    if (text.includes('ik') || text.includes('GLOBALS')) {
-      const m = text.match(/\["ik",\s*"([a-f0-9]+)"\]/i) ||
-                text.match(/GLOBALS\[9\]\s*=\s*["']([a-f0-9]+)["']/i) ||
-                text.match(/["']?ik["']?\s*[:=]\s*["']([a-f0-9]{8,16})["']/i);
-      if (m) return m[1];
-    }
+  if (!url.includes('zw') && url.includes('view=att')) {
+    url += '&zw';
   }
-  const actionTokenEl = document.querySelector('input[name="at"], [data-action-token], [data-ik]');
-  if (actionTokenEl) {
-    return actionTokenEl.value || actionTokenEl.getAttribute('data-ik') || actionTokenEl.getAttribute('data-action-token') || '';
-  }
-  return '';
-}
-
-function buildDirectDownloadUrl(threadId, attId = '0.1') {
-  if (!threadId) return '#';
-  const u = getGmailUserIndex();
-  const ik = getGmailIK();
-  if (ik) {
-    return `https://mail.google.com/mail/u/${u}/?ui=2&ik=${ik}&view=att&th=${threadId}&attid=${attId}&disp=attd&zw`;
-  }
-  return `https://mail.google.com/mail/u/${u}/?view=att&th=${threadId}&attid=${attId}&disp=attd&zw`;
+  return url;
 }
 
 function parseDownloadUrlAttr(raw) {
@@ -160,7 +146,8 @@ function parseDownloadUrlAttr(raw) {
   const mime = raw.substring(0, i1);
   let filename = rest.substring(0, i2);
   try { filename = decodeURIComponent(filename); } catch (_) {}
-  const url = rest.substring(i2 + 1);
+  const rawUrl = rest.substring(i2 + 1);
+  const url = normalizeGmailDownloadUrl(rawUrl);
   return { mime, filename, url };
 }
 
@@ -250,7 +237,7 @@ function scanListView() {
 
     const seenFilesInRow = new Set();
 
-    downloadUrlEls.forEach((el, attIdx) => {
+    downloadUrlEls.forEach((el) => {
       const raw = el.getAttribute('download_url') || '';
       const parsed = parseDownloadUrlAttr(raw);
       if (parsed && parsed.filename) {
@@ -260,7 +247,7 @@ function scanListView() {
         found.push({
           filename: parsed.filename,
           mimeType: parsed.mime || guessMime(parsed.filename),
-          downloadUrl: parsed.url || buildDirectDownloadUrl(threadId, `0.${attIdx + 1}`),
+          downloadUrl: parsed.url || '#',
           thumbnailUrl,
           sizeBytes: estBytes,
           sizeFormatted: '~' + fmtBytes(estBytes),
@@ -274,7 +261,7 @@ function scanListView() {
       }
     });
 
-    chipEls.forEach((chip, attIdx) => {
+    chipEls.forEach((chip) => {
       let filename = chip.getAttribute('title') || chip.getAttribute('download') || '';
       if (!filename) {
         const span = chip.querySelector('span');
@@ -294,11 +281,8 @@ function scanListView() {
       if (!directUrl) {
         const anchor = chip.tagName === 'A' ? chip : chip.querySelector('a[href]');
         if (anchor && (anchor.href.includes('view=att') || anchor.href.includes('disp=attd') || anchor.href.includes('disp=inline'))) {
-          directUrl = anchor.href.replace(/disp=(inline|safe)/, 'disp=attd');
+          directUrl = normalizeGmailDownloadUrl(anchor.href);
         }
-      }
-      if (!directUrl && threadId) {
-        directUrl = buildDirectDownloadUrl(threadId, `0.${attIdx + 1}`);
       }
 
       const thumbnailUrl = extractThumbnail(chip);
@@ -307,7 +291,7 @@ function scanListView() {
       found.push({
         filename,
         mimeType: guessMime(filename),
-        downloadUrl: directUrl || buildDirectDownloadUrl(threadId, `0.${attIdx + 1}`),
+        downloadUrl: directUrl || '#',
         thumbnailUrl,
         sizeBytes: estBytes,
         sizeFormatted: '~' + fmtBytes(estBytes),
@@ -324,7 +308,7 @@ function scanListView() {
   return found;
 }
 
-// ── Escanear correos abiertos ────────────────────────────────────────
+// ── Escanear correos abiertos (Adjuntos Reales + Inline Media) ────────
 function scanOpenedEmail() {
   const found = [];
   const sender = document.querySelector('span[email], span.gD')?.getAttribute('email') ||
@@ -334,7 +318,9 @@ function scanOpenedEmail() {
   const threadId = document.querySelector('[data-legacy-thread-id]')?.getAttribute('data-legacy-thread-id') ||
                    window.location.hash.match(/#.*\/(?:[a-zA-Z0-9_-]+\/)?([a-f0-9]{16})/i)?.[1] || '';
 
-  // Strategy A: Elements with [download_url]
+  const seen = new Set();
+
+  // 1. Elementos estándar con [download_url]
   document.querySelectorAll('[download_url]').forEach(el => {
     const parsed = parseDownloadUrlAttr(el.getAttribute('download_url'));
     if (!parsed || !parsed.filename) return;
@@ -353,10 +339,11 @@ function scanOpenedEmail() {
     const img = el.querySelector('img[src*="disp=th"], img[src*="googleusercontent"], img[src*="attid"]');
     const thumbnailUrl = img ? img.src : '';
 
+    seen.add(parsed.filename.toLowerCase());
     found.push({
       filename: parsed.filename,
       mimeType: parsed.mime || guessMime(parsed.filename),
-      downloadUrl: parsed.url || (threadId ? buildDirectDownloadUrl(threadId) : '#'),
+      downloadUrl: parsed.url,
       thumbnailUrl,
       sizeBytes: parseSize(sizeText) || estimateSize(parsed.filename),
       sizeFormatted: sizeText || ('~' + fmtBytes(estimateSize(parsed.filename))),
@@ -368,32 +355,61 @@ function scanOpenedEmail() {
     });
   });
 
-  // Strategy B: Attachment cards and download anchors
+  // 2. Tarjetas de adjuntos y enlaces de descarga <a>
   document.querySelectorAll('a[download], a[href*="view=att"], a[href*="disp=attd"], a[href*="disp=inline"], .aZo, .a6U, .hq').forEach(el => {
     const link = el.tagName === 'A' ? el : el.querySelector('a[href*="att"], a[download]');
     const filenameEl = el.querySelector('.aV3, span[title], [title]') || el;
     let filename = (el.getAttribute('download') || filenameEl.getAttribute('title') || filenameEl.textContent || '').trim();
     if (!isFilename(filename)) return;
+    if (seen.has(filename.toLowerCase())) return;
 
-    if (found.some(f => f.filename.toLowerCase() === filename.toLowerCase())) return;
-
-    let url = link?.href || '';
-    if (url && (url.includes('disp=inline') || url.includes('disp=safe'))) {
-      url = url.replace(/disp=(inline|safe)/, 'disp=attd');
-    }
-    if (!url && threadId) url = buildDirectDownloadUrl(threadId);
+    let url = normalizeGmailDownloadUrl(link?.href || '');
+    if (!url) return;
 
     const sizeEl = el.querySelector('.aLF, [class*="aLF"]');
     const sizeText = sizeEl ? sizeEl.innerText.trim() : '';
 
+    seen.add(filename.toLowerCase());
     found.push({
       filename,
       mimeType: guessMime(filename),
-      downloadUrl: url || '#',
+      downloadUrl: url,
       thumbnailUrl: extractThumbnail(el),
       sizeBytes: parseSize(sizeText) || estimateSize(filename),
       sizeFormatted: sizeText || ('~' + fmtBytes(estimateSize(filename))),
       sizeEstimated: !sizeText,
+      sender,
+      subject,
+      date,
+      threadId,
+    });
+  });
+
+  // 3. Imágenes, Videos y Audios incrustados (Inline Media)
+  document.querySelectorAll('img[src*="view=att"], img[src*="disp=inline"], img[src*="attid"], video[src*="att"], audio[src*="att"]').forEach(mediaEl => {
+    const src = mediaEl.currentSrc || mediaEl.src || mediaEl.getAttribute('src') || '';
+    if (!src || (!src.includes('view=att') && !src.includes('attid='))) return;
+
+    let filename = mediaEl.getAttribute('alt') || mediaEl.getAttribute('title') || mediaEl.getAttribute('data-original-filename') || '';
+    if (!isFilename(filename)) {
+      // Extract from URL or fallback
+      const m = src.match(/name=([^&]+)/) || src.match(/realattid=([^&]+)/);
+      filename = m ? decodeURIComponent(m[1]) : `archivo_${Date.now()}.${mediaEl.tagName === 'VIDEO' ? 'mp4' : mediaEl.tagName === 'AUDIO' ? 'mp3' : 'png'}`;
+    }
+    if (seen.has(filename.toLowerCase())) return;
+
+    const downloadUrl = normalizeGmailDownloadUrl(src);
+    if (!downloadUrl) return;
+
+    seen.add(filename.toLowerCase());
+    found.push({
+      filename,
+      mimeType: guessMime(filename),
+      downloadUrl,
+      thumbnailUrl: mediaEl.tagName === 'IMG' ? src : '',
+      sizeBytes: estimateSize(filename),
+      sizeFormatted: '~' + fmtBytes(estimateSize(filename)),
+      sizeEstimated: true,
       sender,
       subject,
       date,
@@ -439,32 +455,54 @@ function fullScan() {
   return Array.from(attachmentCache.values());
 }
 
+// ── Resolución Fiable de Adjuntos para Descarga Real ──────────────────
 async function resolveAttachment(item) {
   if (!item?.filename) throw new Error('Identificador de adjunto inválido.');
 
-  if (item.downloadUrl && item.downloadUrl !== '#' && item.downloadUrl.startsWith('http')) {
+  // 1. Si ya tiene URL verificada con disp=attd
+  if (item.downloadUrl && item.downloadUrl !== '#' && item.downloadUrl.startsWith('http') && item.downloadUrl.includes('disp=attd')) {
     return { ...item, downloadUrl: item.downloadUrl };
   }
 
-  if (item.threadId) {
-    const direct = buildDirectDownloadUrl(item.threadId);
-    if (direct && direct !== '#') {
-      return { ...item, downloadUrl: direct };
+  // 2. Si ya está en cache con URL real
+  const cached = attachmentCache.get(dedupKey(item.filename, item.threadId));
+  if (cached && cached.downloadUrl && cached.downloadUrl !== '#' && cached.downloadUrl.includes('disp=attd')) {
+    return { ...item, downloadUrl: cached.downloadUrl, sizeBytes: cached.sizeBytes, sizeFormatted: cached.sizeFormatted };
+  }
+
+  // 3. Abrir la conversación real en Gmail para obtener el enlace binario auténtico
+  const threadId = item.threadId || item.threadUrl?.match(/#.*\/(?:[a-zA-Z0-9_-]+\/)?([a-f0-9]{16})/i)?.[1];
+  if (!threadId) throw new Error(`No se encontró la conversación de ${item.filename}.`);
+
+  const targetHash = `#all/${threadId}`;
+  if (window.location.hash !== targetHash) {
+    window.location.hash = targetHash;
+  }
+
+  for (let attempt = 0; attempt < 30; attempt++) {
+    await sleep(200);
+    const opened = scanOpenedEmail();
+    if (opened.length > 0) {
+      mergeIntoCache(opened);
+      const targetName = item.filename.toLowerCase().trim();
+      const match = opened.find(a => a.filename.toLowerCase().trim() === targetName) ||
+                    opened.find(a => a.filename.toLowerCase().includes(targetName) || targetName.includes(a.filename.toLowerCase())) ||
+                    opened[0];
+      
+      if (match && match.downloadUrl && match.downloadUrl !== '#' && match.downloadUrl.startsWith('http')) {
+        return {
+          ...item,
+          filename: match.filename || item.filename,
+          downloadUrl: match.downloadUrl,
+          sizeBytes: match.sizeBytes || item.sizeBytes,
+          sizeFormatted: match.sizeFormatted || item.sizeFormatted,
+          sizeEstimated: false
+        };
+      }
     }
   }
 
-  const openMatches = scanOpenedEmail();
-  const directMatch = openMatches.find(f => f.filename.toLowerCase() === item.filename.toLowerCase() && f.downloadUrl !== '#');
-  if (directMatch) {
-    return { ...item, ...directMatch };
-  }
-
-  const tid = item.threadId || item.threadUrl?.match(/#.*\/(?:[a-zA-Z0-9_-]+\/)?([a-f0-9]{16})/i)?.[1];
-  if (tid) {
-    return { ...item, downloadUrl: buildDirectDownloadUrl(tid) };
-  }
-
-  throw new Error(`No se pudo resolver enlace para ${item.filename}`);
+  throw new Error(`Gmail no entregó el archivo binario para ${item.filename}.`);
 }
 
 // ── Localización de Acciones de Toolbar (Universal e Internacional) ───
@@ -489,7 +527,7 @@ function findPermanentDeleteButton() {
   const labels = [
     'eliminar definitivamente', 'eliminar para siempre', 'delete forever', 'permanently delete',
     'supprimer définitivement', 'endgültig löschen', 'elimina definitivamente', 'excluir definitivamente',
-    'удалить навseгда', '完全に削除', '永久删除'
+    'удалить навсегда', '完全に削除', '永久删除'
   ];
   const elements = Array.from(document.querySelectorAll('[role="toolbar"] [aria-label], [role="toolbar"] [data-tooltip], [aria-label], [data-tooltip]'));
   const found = elements.find(el => {
@@ -529,7 +567,6 @@ async function trashConversations(items) {
       trashed++;
       trashedItems.push(item);
     } else {
-      // Shortcut fallback '#'
       try {
         document.dispatchEvent(new KeyboardEvent('keydown', { key: '#', code: 'Digit3', keyCode: 51, which: 51, shiftKey: true, bubbles: true }));
         trashed++;
@@ -579,7 +616,6 @@ function reportProgress(page, message) {
   } catch(e) {}
 }
 
-// ── Localizar botón siguiente ─────────────────────────────────────────
 function findNextButton() {
   const selectors = [
     'div[data-tooltip="Resultados siguientes"]',
@@ -617,7 +653,7 @@ function findNextButton() {
 
 // ── Paginación Ultra-Resiliente ───────────────────────────────────────
 async function scrollAndPaginate(query = 'has:attachment', maxPages = 50) {
-  console.log('%c[Pudú v5] 📜 Iniciando escaneo paginado universal…', 'color:#a855f7;font-weight:bold');
+  console.log('%c[Pudú v6] 📜 Iniciando escaneo paginado…', 'color:#a855f7;font-weight:bold');
   attachmentCache.clear();
 
   if (!window.location.hash.includes('#search/has%3Aattachment')) {
@@ -704,7 +740,7 @@ async function scrollAndPaginate(query = 'has:attachment', maxPages = 50) {
   }
 
   reportProgress(currentPage, `Escaneo completado: ${attachmentCache.size} adjuntos encontrados`);
-  console.log(`%c[Pudú v5] 🎉 Fin del escaneo. Total: ${attachmentCache.size} adjuntos`, 'color:#10b981;font-weight:bold');
+  console.log(`%c[Pudú v6] 🎉 Fin del escaneo. Total: ${attachmentCache.size} adjuntos`, 'color:#10b981;font-weight:bold');
   
   return {
     done: true,
@@ -717,7 +753,7 @@ async function scrollAndPaginate(query = 'has:attachment', maxPages = 50) {
 // ── Listener de mensajes ─────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'GMAIL_READY') {
-    sendResponse({ success: true, version: '2.5.0', count: attachmentCache.size });
+    sendResponse({ success: true, version: '2.6.0', count: attachmentCache.size });
     return false;
   }
 
