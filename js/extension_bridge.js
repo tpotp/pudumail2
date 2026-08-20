@@ -78,7 +78,17 @@ class ExtensionBridge {
       let resolved = false;
 
       const responseHandler = (event) => {
-        if (event.data && event.data.source === 'pudu-extension' && event.data.action === 'SCAN_GMAIL_ATTACHMENTS_RESPONSE') {
+        if (!event.data || event.data.source !== 'pudu-extension') return;
+
+        if (event.data.action === 'SCAN_PROGRESS') {
+          console.log('%c[Pudú Bridge Web] 📊 Progreso del escaneo:', 'color: #38bdf8;', event.data.message);
+          window.dispatchEvent(new CustomEvent('pudu:scan-progress', { 
+            detail: { message: event.data.message, count: event.data.count, page: event.data.page } 
+          }));
+          return;
+        }
+
+        if (event.data.action === 'SCAN_GMAIL_ATTACHMENTS_RESPONSE') {
           console.log('%c[Pudú Bridge Web] 🎉 Respuesta de escaneo recibida:', 'color: #10b981; font-weight: bold;', event.data);
           window.removeEventListener('message', responseHandler);
           resolved = true;
@@ -99,10 +109,10 @@ class ExtensionBridge {
         query: query
       }, '*');
 
-      // Safety timeout: 30s to allow deep auto-scroll and pagination scanning
+      // Safety timeout: 120s to allow deep auto-scroll and pagination scanning
       setTimeout(() => {
         if (!resolved) {
-          console.warn('%c[Pudú Bridge Web] ⏱️ Timeout de espera de escaneo alcanzado (30s).', 'color: #ef4444;');
+          console.warn('%c[Pudú Bridge Web] ⏱️ Timeout de espera de escaneo alcanzado (120s).', 'color: #ef4444;');
           window.removeEventListener('message', responseHandler);
           
           if (!this.isInstalled && document.documentElement.getAttribute('data-pudu-connector') !== 'ready') {
@@ -120,7 +130,7 @@ class ExtensionBridge {
             });
           }
         }
-      }, 30000);
+      }, 120000);
     });
   }
 

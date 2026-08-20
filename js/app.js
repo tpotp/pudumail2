@@ -187,20 +187,16 @@ class PuduApp {
 
   async handleScanGmail() {
     console.log('%c[Pudú App] 🚀 Botón Explorar Gmail clickeado', 'color: #38bdf8; font-weight: bold;');
-    this.showLoading(true, '🔍 Escaneando adjuntos en tu Gmail…');
-    
-    // Animate the loading message to show progress
-    const msgs = [
-      '🔍 Escaneando adjuntos en tu Gmail…',
-      '📜 Desplazando la bandeja para encontrar más correos…',
-      '📎 Extrayendo nombres de archivos y tamaños…',
-      '⚡ Casi listo, procesando resultados…'
-    ];
-    let msgIdx = 0;
-    const progressInterval = setInterval(() => {
-      msgIdx = Math.min(msgIdx + 1, msgs.length - 1);
-      this.showLoading(true, msgs[msgIdx]);
-    }, 3000);
+    this.showLoading(true, '🔍 Iniciando escaneo completo de Gmail…', 0);
+
+    // Listen for live progress events from extension
+    const progressHandler = (e) => {
+      const { message, count, page } = e.detail || {};
+      const pct = Math.min(95, (page || 1) * 5); // rough estimate, max 95% until done
+      this.showLoading(true, `${message || '⏳ Escaneando…'} (${count || 0} archivos)`, pct);
+      console.log(`%c[Pudú App] 📊 Progreso: ${message} — ${count} archivos, página ${page}`, 'color:#38bdf8;');
+    };
+    window.addEventListener('pudu:scan-progress', progressHandler);
 
     try {
       // Safety check: ensure PuduBridge is loaded
@@ -215,6 +211,8 @@ class PuduApp {
 
       if (result.success && result.attachments && result.attachments.length > 0) {
         this.attachments = result.attachments;
+        this.showLoading(true, `✅ ${result.attachments.length} archivos encontrados. Procesando…`, 100);
+        await new Promise(r => setTimeout(r, 600));
         this.saveCachedData();
         this.applyFiltersAndRender();
       } else if (result.needsExtension) {
@@ -230,7 +228,7 @@ class PuduApp {
       console.error('[Pudú App] Error en handleScanGmail:', err);
       alert('Error al conectar con Gmail: ' + (err.message || err) + '\n\nAsegúrate de tener Gmail abierto en otra pestaña y la extensión recargada.');
     } finally {
-      clearInterval(progressInterval);
+      window.removeEventListener('pudu:scan-progress', progressHandler);
       this.showLoading(false);
     }
   }
@@ -795,13 +793,17 @@ class PuduApp {
     if (this.previewModal) this.previewModal.classList.add('hidden');
   }
 
-  showLoading(show, text = 'Cargando...') {
+  showLoading(show, text = 'Cargando...', pct = null) {
     if (!this.loadingOverlay) return;
     if (show) {
       if (this.progressText) this.progressText.innerText = text;
+      if (this.progressBar && pct !== null) {
+        this.progressBar.style.width = pct + '%';
+      }
       this.loadingOverlay.classList.remove('hidden');
     } else {
       this.loadingOverlay.classList.add('hidden');
+      if (this.progressBar) this.progressBar.style.width = '0%';
     }
   }
 

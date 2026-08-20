@@ -56,3 +56,14 @@ window.addEventListener('message', (event) => {
     }, '*');
   });
 });
+
+// 4. Listen for push events from Background Worker (e.g., PROGRESS)
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request && request.action === 'SCAN_PROGRESS') {
+    window.postMessage({
+      source: 'pudu-extension',
+      action: 'SCAN_PROGRESS',
+      ...request
+    }, '*');
+  }
+});

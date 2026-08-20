@@ -29,6 +29,17 @@ function handleMessage(request, sender, sendResponse) {
       handleScan(request, sendResponse);
       return true; // async
 
+    case 'SCAN_PROGRESS':
+      // Broadcast to any pudumail web app tabs
+      chrome.tabs.query({ url: "*://pudumail2.vercel.app/*" }).then(tabs => {
+        tabs.forEach(t => chrome.tabs.sendMessage(t.id, request));
+      });
+      chrome.tabs.query({ url: "*://localhost/*" }).then(tabs => {
+        tabs.forEach(t => chrome.tabs.sendMessage(t.id, request));
+      });
+      sendResponse({ success: true });
+      return false;
+
     case 'DOWNLOAD_ATTACHMENT':
       handleDownload(request, sendResponse);
       return true;

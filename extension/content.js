@@ -325,14 +325,43 @@ function extractFromListView() {
         .trim();
 
       if (isLikelyFilename(cleaned)) {
+        // Try to find the exact size element near the chip
+        // Gmail sometimes puts it in `.aLF-aPX-My-a5j-J8` or a span next to it
+        let sizeText = '';
+        const parentRow = chip.closest('td, div[role="gridcell"]');
+        if (parentRow) {
+          const sizeEl = parentRow.querySelector('.aLF-aPX-My-a5j-J8');
+          if (sizeEl) {
+            sizeText = sizeEl.innerText.trim();
+          } else {
+            // Check spans for KB/MB
+            parentRow.querySelectorAll('span').forEach(sp => {
+              const t = (sp.innerText || '').trim();
+              if (/^\d+(\.\d+)?\s*(KB|MB|GB|B)$/i.test(t)) {
+                sizeText = t;
+              }
+            });
+          }
+        }
+
         const estSize = estimateSizeByExtension(cleaned);
+        const finalSizeText = sizeText ? sizeText : '~' + formatBytes(estSize);
+        const finalSizeBytes = sizeText ? parseHumanSize(sizeText) : estSize;
+        const isEstimated = !sizeText;
+
+        if (isEstimated) {
+           console.log(`[Pudú Debug] Chip encontrado: "${cleaned}". ⚠️ No se encontró la clase de peso real. Usando estimado: ${finalSizeText}`);
+        } else {
+           console.log(`[Pudú Debug] Chip encontrado: "${cleaned}". ✅ Peso real extraído: ${finalSizeText}`);
+        }
+
         found.push({
           filename: cleaned,
           mimeType: guessMimeType(cleaned),
           downloadUrl: '#', // No direct URL in list view
-          sizeBytes: estSize,
-          sizeFormatted: '~' + formatBytes(estSize),
-          sizeEstimated: true,
+          sizeBytes: finalSizeBytes,
+          sizeFormatted: finalSizeText,
+          sizeEstimated: isEstimated,
           sender: sender || 'Gmail',
           subject: subject || 'Correo',
           date: date || new Date().toISOString()
@@ -482,13 +511,15 @@ function runFullScan() {
 }
 
 // ── Auto-scroll and Pagination to load more rows ───────────────────────
-async function scrollAndCollect(maxScrolls = 10) {
+async function scrollAndCollect(maxScrolls = 50) {
   console.log('%c[Pudú Content v2] 📜 Auto-scroll y paginación para cargar más correos…', 'color:#a855f7;');
 
   const scrollContainer = document.querySelector('div.AO, div[role="main"], div.nH.oy8Mbf') || document.querySelector('.aeF');
   if (!scrollContainer) {
     console.log('[Pudú Content v2] No se encontró contenedor scrolleable principal, intentaremos paginar de todos modos.');
   }
+
+  let currentPage = 1;
 
   for (let i = 0; i < maxScrolls; i++) {
     const prevSize = attachmentCache.size;
@@ -501,18 +532,21 @@ async function scrollAndCollect(maxScrolls = 10) {
     
     await sleep(800);
     runFullScan();
+    reportProgress(currentPage, `Extrayendo datos de la página ${currentPage}... (${attachmentCache.size} adjuntos)`);
 
     // If no new items were found from scrolling, try clicking the "Older" (Next page) button
-    if (attachmentCache.size === prevSize) {
+    if (attachmentCache.size === prevSize || (i > 0 && i % 4 === 0)) {
       const nextBtn = document.querySelector('[data-tooltip="Older"], [aria-label="Older"], [data-tooltip="Más antiguos"], [aria-label="Más antiguos"], [data-tooltip*="ntiguos"], [aria-label*="ntiguos"]');
       
       if (nextBtn && nextBtn.getAttribute('aria-disabled') !== 'true') {
-        console.log(`[Pudú Content v2] Paginando a la siguiente página (Paso ${i + 1})...`);
+        currentPage++;
+        console.log(`[Pudú Content v2] Paginando a la siguiente página ${currentPage} (Paso ${i + 1})...`);
+        reportProgress(currentPage, `Navegando a la página ${currentPage}...`);
         nextBtn.click();
-        await sleep(1500); // Wait for the new page to load
+        await sleep(2500); // Wait for the new page to load via AJAX
         runFullScan();
       } else {
-        if (i > 3) {
+        if (i > 3 && attachmentCache.size === prevSize) {
           console.log(`[Pudú Content v2] Auto-scroll detenido (no hay más páginas ni datos) en paso ${i + 1}`);
           break;
         }
@@ -522,6 +556,7 @@ async function scrollAndCollect(maxScrolls = 10) {
 
   // Scroll back to top
   if (scrollContainer) scrollContainer.scrollTop = 0;
+  reportProgress(currentPage, `Escaneo completado. Procesando ${attachmentCache.size} resultados...`);
 }
 
 function sleep(ms) {
@@ -567,6 +602,18 @@ function startObserver() {
   console.log('%c[Pudú Content v2] 👁️ MutationObserver iniciado', 'color:#38bdf8;');
 }
 
+function reportProgress(page, message) {
+  chrome.runtime.sendMessage({
+    action: 'SCAN_PROGRESS',
+    count: attachmentCache.size,
+    page: page,
+    message: message || `Escaneando página ${page}...`
+  }, () => {
+    // ignore response or errors if nobody is listening
+    if (chrome.runtime.lastError) {} 
+  });
+}
+
 // ── Message handler (from background.js) ─────────────────────────────
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'EXTRACT_ATTACHMENTS') {
@@ -574,10 +621,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     // Run a full scan immediately
     runFullScan();
+    reportProgress(1, 'Iniciando escaneo...');
 
     if (request.autoScroll !== false) {
       // Do async scroll+scan and pagination, then send updated results
-      scrollAndCollect(10).then(() => {
+      scrollAndCollect(50).then(() => {
         const finalResults = Array.from(attachmentCache.values());
         console.log(`%c[Pudú Content v2] 🎯 Resultado final tras auto-scroll y paginación: ${finalResults.length} adjuntos`, 'color:#10b981;font-weight:bold;');
         sendResponse({ success: true, count: finalResults.length, attachments: finalResults });
