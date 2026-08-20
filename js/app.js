@@ -575,7 +575,14 @@ class PuduApp {
   }
 
   async downloadWithExtension(items) {
-    this.showLoading(true, 'Guardando adjuntos reales en Descargas/PuduMail_Adjuntos...');
+    const progressHandler = e => {
+      const { message, count, page } = e.detail || {};
+      const pct = (count && page) ? Math.min(100, Math.round((page / count) * 100)) : 50;
+      this.showLoading(true, message || 'Guardando adjuntos en Descargas/PuduMail_Adjuntos…', pct);
+    };
+    window.addEventListener('pudu:scan-progress', progressHandler);
+    this.showLoading(true, `Preparando ${items.length} descarga(s)...`, 10);
+
     try {
       const result = await window.PuduBridge.downloadAttachments(items);
       const verified = result.verifications?.filter(item => item.exists).length || 0;
@@ -607,6 +614,7 @@ class PuduApp {
     } catch (error) {
       alert(error.message || 'No se pudieron descargar los adjuntos.');
     } finally {
+      window.removeEventListener('pudu:scan-progress', progressHandler);
       this.showLoading(false);
     }
   }
