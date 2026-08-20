@@ -194,6 +194,11 @@ body.pudu-body {
   border-color: rgba(255, 255, 255, 0.2);
 }
 
+.btn-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .btn-success {
   display: inline-flex;
   align-items: center;
@@ -503,16 +508,6 @@ body.pudu-body {
 .action-right {
   display: flex;
   gap: 8px;
-}
-
-.trash-after-save {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: 12px;
-  color: var(--text-secondary, #64748b);
-  font-size: 12px;
-  cursor: pointer;
 }
 
 /* Dropzone */

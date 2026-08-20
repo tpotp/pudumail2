@@ -15,6 +15,7 @@ class PuduApp {
     this.searchQuery = '';
     this.minSizeBytes = 0;
     this.viewMode = 'table'; // 'table' or 'grid'
+    this.readyToCleanItems = [];
 
     this.initElements();
     this.bindEvents();
@@ -37,7 +38,7 @@ class PuduApp {
     this.btnSortSize = document.getElementById('btnSortSize');
     this.btnScanGmail = document.getElementById('btnScanGmail');
     this.btnSelectAll = document.getElementById('btnSelectAll');
-    this.trashAfterSave = document.getElementById('trashAfterSave');
+    this.btnCleanGmail = document.getElementById('btnCleanGmail');
     this.btnMoveToDisk = document.getElementById('btnMoveToDisk');
     this.btnDownloadZip = document.getElementById('btnDownloadZip');
     this.btnViewTable = document.getElementById('btnViewTable');
@@ -124,6 +125,10 @@ class PuduApp {
     // Download ZIP
     if (this.btnDownloadZip) {
       this.btnDownloadZip.addEventListener('click', () => this.handleDownloadZip());
+    }
+
+    if (this.btnCleanGmail) {
+      this.btnCleanGmail.addEventListener('click', () => this.cleanVerifiedConversations());
     }
 
     // View Switcher (Table / Grid)
@@ -573,10 +578,10 @@ class PuduApp {
     this.showLoading(true, 'Guardando adjuntos reales en Descargas/PuduMail_Adjuntos...');
     try {
       const result = await window.PuduBridge.downloadAttachments(items);
-      if (result.cleanupItems?.length) await this.maybeTrashSavedConversations(result.cleanupItems);
+      this.addReadyCleanupItems(result.cleanupItems || []);
       const verified = result.verifications?.filter(item => item.exists).length || 0;
       alert(result.downloaded
-        ? `Chrome confirmó ${verified} de ${result.downloaded} descarga(s) completada(s) en Descargas/PuduMail_Adjuntos.${result.errors?.length ? ` ${result.errors.length} archivo(s) fallaron y no se ofrecerán para limpieza.` : ''}`
+        ? `Chrome confirmó ${verified} de ${result.downloaded} descarga(s) completada(s) en Descargas/PuduMail_Adjuntos.${result.cleanupItems?.length ? ' Ya puedes pulsar “Limpiar Gmail” si quieres borrar las conversaciones respaldadas.' : ''}${result.errors?.length ? ` ${result.errors.length} archivo(s) fallaron y no se ofrecerán para limpieza.` : ''}`
         : 'No se pudo descargar ningún archivo. Gmail no se modificó.');
     } catch (error) {
       alert(error.message || 'No se pudieron descargar los adjuntos.');
@@ -589,8 +594,30 @@ class PuduApp {
     await this.downloadWithExtension([item]);
   }
 
-  async maybeTrashSavedConversations(items) {
-    if (!this.trashAfterSave?.checked || !items.length) return;
+  cleanupKey(item) {
+    return item.threadUrl || item.threadId || item.id;
+  }
+
+  addReadyCleanupItems(items) {
+    const pending = new Map(this.readyToCleanItems.map(item => [this.cleanupKey(item), item]));
+    items.forEach(item => pending.set(this.cleanupKey(item), item));
+    this.readyToCleanItems = [...pending.values()];
+    this.updateCleanupButton();
+  }
+
+  updateCleanupButton() {
+    if (!this.btnCleanGmail) return;
+    const conversations = new Set(this.readyToCleanItems.map(item => this.cleanupKey(item)).filter(Boolean)).size;
+    this.btnCleanGmail.disabled = !conversations;
+    this.btnCleanGmail.textContent = conversations ? `🗑️ Limpiar Gmail (${conversations})` : '🗑️ Limpiar Gmail';
+    this.btnCleanGmail.title = conversations
+      ? 'Mueve a Papelera sólo las conversaciones cuyos adjuntos Chrome verificó.'
+      : 'Descarga y verifica archivos antes de habilitar la limpieza.';
+  }
+
+  async cleanVerifiedConversations() {
+    const items = this.readyToCleanItems;
+    if (!items.length) return;
     const conversations = new Set(items.map(item => item.threadUrl || item.threadId).filter(Boolean)).size;
     if (!conversations || !confirm(
       `Respaldo verificado para ${items.length} archivo(s).\n\n` +
@@ -602,6 +629,9 @@ class PuduApp {
       if (!response.success) throw new Error(response.error || 'No se pudieron enviar las conversaciones a la Papelera.');
       if (response.errors?.length) console.warn('Papelera parcial:', response.errors);
       const trashedItems = response.trashedItems || [];
+      const trashedKeys = new Set(trashedItems.map(item => this.cleanupKey(item)));
+      this.readyToCleanItems = items.filter(item => !trashedKeys.has(this.cleanupKey(item)));
+      this.updateCleanupButton();
       if (trashedItems.length && confirm(
         `Se movieron ${response.trashed} conversación(es) a Papelera.\n\n` +
         'ÚLTIMA ADVERTENCIA: eliminar permanentemente libera la cuota de Gmail, pero no se puede deshacer. Google puede tardar hasta 48–72 horas en actualizar el espacio.\n\n' +
