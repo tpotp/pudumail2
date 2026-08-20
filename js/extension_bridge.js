@@ -99,10 +99,10 @@ class ExtensionBridge {
         query: query
       }, '*');
 
-      // Safety timeout: 15s to allow auto-scroll scanning
+      // Safety timeout: 30s to allow deep auto-scroll and pagination scanning
       setTimeout(() => {
         if (!resolved) {
-          console.warn('%c[Pudú Bridge Web] ⏱️ Timeout de espera de escaneo alcanzado (15s).', 'color: #ef4444;');
+          console.warn('%c[Pudú Bridge Web] ⏱️ Timeout de espera de escaneo alcanzado (30s).', 'color: #ef4444;');
           window.removeEventListener('message', responseHandler);
           
           if (!this.isInstalled && document.documentElement.getAttribute('data-pudu-connector') !== 'ready') {
@@ -120,7 +120,7 @@ class ExtensionBridge {
             });
           }
         }
-      }, 15000);
+      }, 30000);
     });
   }
 

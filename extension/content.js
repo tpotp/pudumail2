@@ -481,34 +481,47 @@ function runFullScan() {
   return Array.from(attachmentCache.values());
 }
 
-// ── Auto-scroll to load more rows ────────────────────────────────────
-async function scrollAndCollect(maxScrolls = 8) {
-  console.log('%c[Pudú Content v2] 📜 Auto-scroll para cargar más correos…', 'color:#a855f7;');
+// ── Auto-scroll and Pagination to load more rows ───────────────────────
+async function scrollAndCollect(maxScrolls = 10) {
+  console.log('%c[Pudú Content v2] 📜 Auto-scroll y paginación para cargar más correos…', 'color:#a855f7;');
 
   const scrollContainer = document.querySelector('div.AO, div[role="main"], div.nH.oy8Mbf') || document.querySelector('.aeF');
   if (!scrollContainer) {
-    console.log('[Pudú Content v2] No se encontró contenedor scrolleable');
-    return;
+    console.log('[Pudú Content v2] No se encontró contenedor scrolleable principal, intentaremos paginar de todos modos.');
   }
 
   for (let i = 0; i < maxScrolls; i++) {
     const prevSize = attachmentCache.size;
-    scrollContainer.scrollTop = scrollContainer.scrollTop + 600;
     
-    // Simula eventos de scroll para activar el lazy load de Gmail
-    scrollContainer.dispatchEvent(new Event('scroll'));
+    if (scrollContainer) {
+      scrollContainer.scrollTop = scrollContainer.scrollTop + 800;
+      // Simula eventos de scroll para activar el lazy load de Gmail
+      scrollContainer.dispatchEvent(new Event('scroll'));
+    }
     
-    await sleep(600);
+    await sleep(800);
     runFullScan();
 
-    if (attachmentCache.size === prevSize && i > 3) {
-      console.log(`[Pudú Content v2] Auto-scroll detenido (no hay nuevos datos) en paso ${i + 1}`);
-      break;
+    // If no new items were found from scrolling, try clicking the "Older" (Next page) button
+    if (attachmentCache.size === prevSize) {
+      const nextBtn = document.querySelector('[data-tooltip="Older"], [aria-label="Older"], [data-tooltip="Más antiguos"], [aria-label="Más antiguos"], [data-tooltip*="ntiguos"], [aria-label*="ntiguos"]');
+      
+      if (nextBtn && nextBtn.getAttribute('aria-disabled') !== 'true') {
+        console.log(`[Pudú Content v2] Paginando a la siguiente página (Paso ${i + 1})...`);
+        nextBtn.click();
+        await sleep(1500); // Wait for the new page to load
+        runFullScan();
+      } else {
+        if (i > 3) {
+          console.log(`[Pudú Content v2] Auto-scroll detenido (no hay más páginas ni datos) en paso ${i + 1}`);
+          break;
+        }
+      }
     }
   }
 
   // Scroll back to top
-  scrollContainer.scrollTop = 0;
+  if (scrollContainer) scrollContainer.scrollTop = 0;
 }
 
 function sleep(ms) {
@@ -560,19 +573,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     console.log('%c[Pudú Content v2] 📩 Solicitud de extracción recibida', 'color:#f59e0b;font-weight:bold;', request);
 
     // Run a full scan immediately
-    const results = runFullScan();
+    runFullScan();
 
-    // If we got very few results, try auto-scroll
-    if (results.length < 5 && request.autoScroll !== false) {
-      // Do async scroll+scan, then send updated results
-      scrollAndCollect(6).then(() => {
+    if (request.autoScroll !== false) {
+      // Do async scroll+scan and pagination, then send updated results
+      scrollAndCollect(10).then(() => {
         const finalResults = Array.from(attachmentCache.values());
-        console.log(`%c[Pudú Content v2] 🎯 Resultado final tras auto-scroll: ${finalResults.length} adjuntos`, 'color:#10b981;font-weight:bold;');
+        console.log(`%c[Pudú Content v2] 🎯 Resultado final tras auto-scroll y paginación: ${finalResults.length} adjuntos`, 'color:#10b981;font-weight:bold;');
         sendResponse({ success: true, count: finalResults.length, attachments: finalResults });
       });
       return true; // keep channel open for async
     }
 
+    const results = Array.from(attachmentCache.values());
     console.log(`%c[Pudú Content v2] 🎯 Resultado inmediato: ${results.length} adjuntos`, 'color:#10b981;font-weight:bold;');
     sendResponse({ success: true, count: results.length, attachments: results });
     return false;
