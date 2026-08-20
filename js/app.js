@@ -203,6 +203,13 @@ class PuduApp {
     }, 3000);
 
     try {
+      // Safety check: ensure PuduBridge is loaded
+      if (!window.PuduBridge || typeof window.PuduBridge.scanGmail !== 'function') {
+        console.error('[Pudú App] ❌ PuduBridge no disponible. ¿extension_bridge.js cargó correctamente?');
+        this.openExtensionModal();
+        return;
+      }
+
       const result = await window.PuduBridge.scanGmail('has:attachment');
       console.log('%c[Pudú App] Resultado del escaneo:', 'color: #10b981;', result);
 
@@ -221,7 +228,7 @@ class PuduApp {
       }
     } catch (err) {
       console.error('[Pudú App] Error en handleScanGmail:', err);
-      alert('Error al conectar con Gmail. Asegúrate de tener Gmail abierto en otra pestaña.');
+      alert('Error al conectar con Gmail: ' + (err.message || err) + '\n\nAsegúrate de tener Gmail abierto en otra pestaña y la extensión recargada.');
     } finally {
       clearInterval(progressInterval);
       this.showLoading(false);
