@@ -663,7 +663,7 @@ class PuduApp {
 
   async maybeTrashSavedConversations(items) {
     if (!this.trashAfterSave?.checked || !items.length) return;
-    const conversations = new Set(items.map(item => item.threadId).filter(Boolean)).size;
+    const conversations = new Set(items.map(item => item.threadUrl || item.threadId).filter(Boolean)).size;
     if (!conversations || !confirm(`Los adjuntos ya se guardaron. ¿Enviar ${conversations} conversación(es) a la Papelera de Gmail?`)) return;
     try {
       const response = await window.PuduBridge.request('TRASH_CONVERSATIONS', { items });
@@ -773,6 +773,7 @@ class PuduApp {
         subject: a.subject,
         date: a.date,
         threadId: a.threadId,
+        threadUrl: a.threadUrl,
         // Gmail links expire quickly; retain only local metadata and resolve again on demand.
         downloadUrl: '#'
       }));

@@ -67,6 +67,15 @@ class ExtensionBridge {
     return this.isInstalled;
   }
 
+  async waitForExtension() {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      if (this.isInstalled) return true;
+      this.ping();
+      await new Promise(resolve => setTimeout(resolve, 250 * 2 ** attempt));
+    }
+    return this.isInstalled;
+  }
+
   /**
    * Request Gmail attachments scan from extension
    */
@@ -74,8 +83,16 @@ class ExtensionBridge {
     console.log('%c[Pudú Bridge Web] 🔍 Solicitando escaneo de adjuntos...', 'color: #f59e0b; font-weight: bold;', query);
     this.checkDomMarker();
 
+    if (!await this.waitForExtension()) {
+      return { success: false, needsExtension: true, error: 'Conector no detectado.' };
+    }
+
     return new Promise((resolve) => {
-      let resolved = false;
+      let attempt = 0;
+
+      const sendScan = (continueScan = false) => {
+        window.postMessage({ source: 'pudu-web', action: 'SCAN_GMAIL_ATTACHMENTS', query, continue: continueScan }, window.location.origin);
+      };
 
       const responseHandler = (event) => {
         if (event.source !== window || event.origin !== window.location.origin || !event.data || event.data.source !== 'pudu-extension') return;
@@ -90,11 +107,22 @@ class ExtensionBridge {
 
         if (event.data.action === 'SCAN_GMAIL_ATTACHMENTS_RESPONSE') {
           console.log('%c[Pudú Bridge Web] 🎉 Respuesta de escaneo recibida:', 'color: #10b981; font-weight: bold;', event.data);
-          window.removeEventListener('message', responseHandler);
-          resolved = true;
-          if (event.data.success && event.data.attachments) {
-            resolve({ success: true, attachments: event.data.attachments, count: event.data.attachments.length });
+            if (event.data.success && event.data.done && event.data.attachments) {
+              window.removeEventListener('message', responseHandler);
+              resolve({ success: true, attachments: event.data.attachments, count: event.data.attachments.length });
+            } else if (event.data.success && event.data.done) {
+              window.removeEventListener('message', responseHandler);
+              resolve({ success: true, attachments: [], count: 0 });
+            } else if (event.data.success) {
+              setTimeout(() => sendScan(true), 50);
+            } else if (attempt < 3) {
+            attempt++;
+            window.dispatchEvent(new CustomEvent('pudu:scan-progress', {
+              detail: { message: 'Reconectando el escaneo…', count: 0, page: 0 }
+            }));
+            setTimeout(() => sendScan(true), Math.min(8000, 1000 * 2 ** attempt));
           } else {
+            window.removeEventListener('message', responseHandler);
             resolve({ success: false, error: event.data.error || 'Error al escanear' });
           }
         }
@@ -103,29 +131,8 @@ class ExtensionBridge {
       window.addEventListener('message', responseHandler);
 
       // Send request to extension bridge
-      window.postMessage({
-        source: 'pudu-web',
-        action: 'SCAN_GMAIL_ATTACHMENTS',
-        query: query
-      }, window.location.origin);
+      sendScan();
 
-      // Gmail can have hundreds of result pages; the extension reports progress while it scans.
-      setTimeout(() => {
-        if (!resolved) {
-          console.warn('%c[Pudú Bridge Web] ⏱️ Timeout de espera de escaneo alcanzado (120s).', 'color: #ef4444;');
-          window.removeEventListener('message', responseHandler);
-          
-          if (!this.isInstalled && document.documentElement.getAttribute('data-pudu-connector') !== 'ready') {
-            resolve({
-              success: false,
-              needsExtension: true,
-              error: 'Conector no detectado. Abre Gmail e instala la extensión.'
-            });
-          } else {
-            resolve({ success: false, error: 'El conector tardó demasiado. Abre Gmail y vuelve a intentarlo.' });
-          }
-        }
-      }, 240000);
     });
   }
 
@@ -145,7 +152,7 @@ class ExtensionBridge {
       setTimeout(() => {
         window.removeEventListener('message', handler);
         resolve({ success: false, error: 'El conector no respondió.' });
-      }, 30000);
+      }, 120000);
     });
   }
 

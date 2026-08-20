@@ -20,11 +20,11 @@ function announceReady() {
     source: 'pudu-extension',
     action: 'PONG',
     installed: true,
-    version: '2.1.0'
+    version: '2.3.0'
   }, window.location.origin);
 
   window.dispatchEvent(new CustomEvent('pudu:extension-ready', {
-    detail: { installed: true, version: '2.1.0' }
+    detail: { installed: true, version: '2.3.0' }
   }));
 }
 
@@ -44,22 +44,25 @@ window.addEventListener('message', (event) => {
     return;
   }
 
-  // Forward request to background service worker
-  console.log('%c[Pudú Web Bridge] 🔄 Reenviando al Background Service Worker:', 'color: #a855f7;', action);
-  
-  chrome.runtime.sendMessage(event.data, (response) => {
-    const error = chrome.runtime.lastError;
-    console.log('%c[Pudú Web Bridge] 📤 Respuesta del Background recibida:', 'color: #10b981;', response, 'Error:', error);
+  relayToBackground(event.data, event.origin);
+});
 
+function relayToBackground(request, origin, attempt = 0) {
+  chrome.runtime.sendMessage(request, response => {
+    const error = chrome.runtime.lastError;
+    if (error && attempt < 8) {
+      setTimeout(() => relayToBackground(request, origin, attempt + 1), Math.min(4000, 250 * 2 ** attempt));
+      return;
+    }
     window.postMessage({
       source: 'pudu-extension',
-      action: action + '_RESPONSE',
+      action: request.action + '_RESPONSE',
       success: !error && (response?.success ?? true),
       ...(response || {}),
       error: error ? error.message : response?.error
-    }, event.origin);
+    }, origin);
   });
-});
+}
 
 // 4. Listen for push events from Background Worker (e.g., PROGRESS)
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
