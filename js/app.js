@@ -1,4 +1,4 @@
-﻿/**
+/**
  * PUDÚ GMAIL - MAIN APPLICATION CONTROLLER
  * High-Performance Thumbnail Engine, 100+ Formats Detector & Gold-Standard Infinite Scroll
  * 100% Client-Side for Vercel Free
@@ -1378,7 +1378,12 @@ async function init() {
     if (savedThumbs && savedThumbs.length > 0) {
       savedThumbs.forEach(t => {
         if (t && t.id && t.dataUrl) {
-          state.blobCache.set(t.id, t.dataUrl);
+          if (t.dataUrl.startsWith('blob:')) {
+            // Delete stale blob URLs from cache
+            window.puduStorage.db.delete('thumbnails', t.id).catch(()=>{});
+          } else {
+            state.blobCache.set(t.id, t.dataUrl);
+          }
         }
       });
     }
