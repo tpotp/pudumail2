@@ -13,7 +13,8 @@
     "storage",
     "activeTab",
     "tabs",
-    "scripting"
+    "scripting",
+    "identity"
   ],
   "host_permissions": [
     "https://mail.google.com/*",
@@ -23,11 +24,7 @@
     "service_worker": "background.js"
   },
   "content_scripts": [
-    {
-      "matches": ["https://mail.google.com/*"],
-      "js": ["content.js"],
-      "run_at": "document_idle"
-    },
+
     {
       "matches": [
         "https://pudumail2.vercel.app/*",
@@ -54,6 +51,13 @@
       "https://*.vercel.app/*",
       "http://localhost/*",
       "http://127.0.0.1/*"
+    ]
+  },
+  "oauth2": {
+    "client_id": "329468340708-969icehglruk3207esur22ipuhjt7ott.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/gmail.readonly",
+      "https://www.googleapis.com/auth/gmail.modify"
     ]
   }
 }
