@@ -578,11 +578,32 @@ class PuduApp {
     this.showLoading(true, 'Guardando adjuntos reales en Descargas/PuduMail_Adjuntos...');
     try {
       const result = await window.PuduBridge.downloadAttachments(items);
-      this.addReadyCleanupItems(result.cleanupItems || []);
       const verified = result.verifications?.filter(item => item.exists).length || 0;
-      alert(result.downloaded
-        ? `Chrome confirmó ${verified} de ${result.downloaded} descarga(s) completada(s) en Descargas/PuduMail_Adjuntos.${result.cleanupItems?.length ? ' Ya puedes pulsar “Limpiar Gmail” si quieres borrar las conversaciones respaldadas.' : ''}${result.errors?.length ? ` ${result.errors.length} archivo(s) fallaron y no se ofrecerán para limpieza.` : ''}`
-        : 'No se pudo descargar ningún archivo. Gmail no se modificó.');
+      const cleanupItems = result.cleanupItems || [];
+
+      if (!result.downloaded) {
+        alert('No se pudo descargar ningún archivo. Gmail no se modificó.');
+        return;
+      }
+
+      // Track as fallback in case the user declines now but wants to clean later
+      this.addReadyCleanupItems(cleanupItems);
+
+      const errMsg = result.errors?.length ? `\n${result.errors.length} archivo(s) fallaron y no se ofrecerán para limpieza.` : '';
+
+      // Integrated flow: download verified → ask to delete immediately
+      if (cleanupItems.length > 0 && verified > 0) {
+        const wantDelete = confirm(
+          `✅ Chrome verificó ${verified} de ${result.downloaded} descarga(s) en Descargas/PuduMail_Adjuntos.${errMsg}\n\n` +
+          `¿Deseas borrar estos archivos de Gmail ahora?\n\n` +
+          `(Si eliges "Cancelar", los archivos permanecen tanto en tu PC como en Gmail.)`
+        );
+        if (wantDelete) {
+          await this.trashAndPurge(cleanupItems);
+        }
+      } else {
+        alert(`Chrome confirmó ${verified} de ${result.downloaded} descarga(s) en Descargas/PuduMail_Adjuntos.${errMsg}`);
+      }
     } catch (error) {
       alert(error.message || 'No se pudieron descargar los adjuntos.');
     } finally {
@@ -592,6 +613,54 @@ class PuduApp {
 
   async downloadSingle(item) {
     await this.downloadWithExtension([item]);
+  }
+
+  /**
+   * Reusable trash + optional permanent-delete flow.
+   * Used by both the integrated post-download prompt and the fallback "Limpiar Gmail" button.
+   */
+  async trashAndPurge(items) {
+    if (!items.length) return;
+    const conversations = new Set(items.map(item => (item.threadUrl || item.threadId)).filter(Boolean)).size;
+    if (!conversations) {
+      alert('No se encontraron conversaciones asociadas a estos archivos.');
+      return;
+    }
+
+    try {
+      this.showLoading(true, 'Moviendo conversaciones a la Papelera de Gmail...');
+      const response = await window.PuduBridge.request('TRASH_CONVERSATIONS', { items });
+      if (!response.success) throw new Error(response.error || 'No se pudieron enviar las conversaciones a la Papelera.');
+      if (response.errors?.length) console.warn('Papelera parcial:', response.errors);
+
+      const trashedItems = response.trashedItems || [];
+
+      // Remove trashed items from fallback list
+      const trashedKeys = new Set(trashedItems.map(item => this.cleanupKey(item)));
+      this.readyToCleanItems = this.readyToCleanItems.filter(item => !trashedKeys.has(this.cleanupKey(item)));
+      this.updateCleanupButton();
+
+      if (trashedItems.length > 0 && confirm(
+        `✅ Se movieron ${response.trashed} conversación(es) a la Papelera de Gmail.\n\n` +
+        'ÚLTIMA ADVERTENCIA: eliminar permanentemente libera la cuota de Gmail, pero no se puede deshacer. Google puede tardar hasta 48–72 horas en actualizar el espacio.\n\n' +
+        '¿Eliminar permanentemente estas conversaciones ahora?'
+      )) {
+        this.showLoading(true, 'Eliminando permanentemente de Gmail...');
+        const purge = await window.PuduBridge.request('PURGE_CONVERSATIONS', { items: trashedItems });
+        if (!purge.success) throw new Error(purge.error || 'No se pudo eliminar permanentemente desde Gmail.');
+        if (purge.errors?.length) {
+          alert(`Se eliminaron permanentemente ${purge.purged} conversación(es); ${purge.errors.length} no se pudieron eliminar. Google puede tardar hasta 48–72 horas en reflejar el espacio liberado.`);
+        } else {
+          alert(`Eliminación permanente solicitada para ${purge.purged} conversación(es). Google puede tardar hasta 48–72 horas en reflejar el espacio liberado.`);
+        }
+      } else if (trashedItems.length > 0) {
+        alert(`${response.trashed} conversación(es) movidas a la Papelera. Puedes vaciarla manualmente desde Gmail para liberar espacio.`);
+      }
+    } catch (error) {
+      alert(`Los archivos ya se guardaron, pero Gmail no movió los correos a la Papelera: ${error.message}`);
+    } finally {
+      this.showLoading(false);
+    }
   }
 
   cleanupKey(item) {
@@ -624,30 +693,7 @@ class PuduApp {
       `RIESGO: Gmail moverá ${conversations} conversación(es) completas a la Papelera. Esto puede incluir mensajes o adjuntos no seleccionados. La Papelera sigue contando en tu cuota hasta vaciarla.\n\n` +
       '¿Mover esas conversaciones a Papelera recuperable?'
     )) return;
-    try {
-      const response = await window.PuduBridge.request('TRASH_CONVERSATIONS', { items });
-      if (!response.success) throw new Error(response.error || 'No se pudieron enviar las conversaciones a la Papelera.');
-      if (response.errors?.length) console.warn('Papelera parcial:', response.errors);
-      const trashedItems = response.trashedItems || [];
-      const trashedKeys = new Set(trashedItems.map(item => this.cleanupKey(item)));
-      this.readyToCleanItems = items.filter(item => !trashedKeys.has(this.cleanupKey(item)));
-      this.updateCleanupButton();
-      if (trashedItems.length && confirm(
-        `Se movieron ${response.trashed} conversación(es) a Papelera.\n\n` +
-        'ÚLTIMA ADVERTENCIA: eliminar permanentemente libera la cuota de Gmail, pero no se puede deshacer. Google puede tardar hasta 48–72 horas en actualizar el espacio.\n\n' +
-        '¿Eliminar permanentemente estas conversaciones ahora?'
-      )) {
-        const purge = await window.PuduBridge.request('PURGE_CONVERSATIONS', { items: trashedItems });
-        if (!purge.success) throw new Error(purge.error || 'No se pudo eliminar permanentemente desde Gmail.');
-        if (purge.errors?.length) {
-          alert(`Se eliminaron permanentemente ${purge.purged} conversación(es); ${purge.errors.length} no se pudieron eliminar. Google puede tardar hasta 48–72 horas en reflejar el espacio liberado.`);
-        } else {
-          alert(`Eliminación permanente solicitada para ${purge.purged} conversación(es). Google puede tardar hasta 48–72 horas en reflejar el espacio liberado.`);
-        }
-      }
-    } catch (error) {
-      alert(`Los archivos ya se guardaron, pero Gmail no movió los correos a la Papelera: ${error.message}`);
-    }
+    await this.trashAndPurge(items);
   }
 
   async openPreviewModal(item) {
