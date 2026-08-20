@@ -54,7 +54,7 @@
     ]
   },
   "oauth2": {
-    "client_id": "329468340708-969icehglruk3207esur22ipuhjt7ott.apps.googleusercontent.com",
+    "client_id": "329468340708-1pejmiuiecpret2er3t5otop6gf06p3b.apps.googleusercontent.com",
     "scopes": [
       "https://www.googleapis.com/auth/gmail.readonly",
       "https://www.googleapis.com/auth/gmail.modify"
