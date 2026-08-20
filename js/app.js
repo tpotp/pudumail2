@@ -458,8 +458,8 @@ class PuduApp {
             </div>
           </td>
           <td>
-            <span class="size-pill ${item.sizeBytes > 25 * 1024 * 1024 ? 'size-heavy' : ''}">
-              ${item.sizeFormatted || PuduFormats.formatBytes(item.sizeBytes)}
+            <span class="size-pill ${item.sizeBytes > 25 * 1024 * 1024 ? 'size-heavy' : ''} ${item.sizeEstimated ? 'size-estimated' : ''}">
+              ${item.sizeBytes > 0 ? (item.sizeEstimated ? '~' : '') + PuduFormats.formatBytes(item.sizeBytes) : '—'}
             </span>
           </td>
           <td>
@@ -497,8 +497,8 @@ class PuduApp {
         <div class="grid-card ${isSelected ? 'card-selected' : ''}" data-id="${item.id}">
           <div class="grid-card-header">
             <input type="checkbox" class="row-checkbox" data-id="${item.id}" ${isSelected ? 'checked' : ''}>
-            <span class="size-pill ${item.sizeBytes > 25 * 1024 * 1024 ? 'size-heavy' : ''}">
-              ${item.sizeFormatted || PuduFormats.formatBytes(item.sizeBytes)}
+            <span class="size-pill ${item.sizeBytes > 25 * 1024 * 1024 ? 'size-heavy' : ''} ${item.sizeEstimated ? 'size-estimated' : ''}">
+              ${item.sizeBytes > 0 ? (item.sizeEstimated ? '~' : '') + PuduFormats.formatBytes(item.sizeBytes) : '—'}
             </span>
           </div>
           <div class="grid-card-body btn-preview" data-id="${item.id}">
@@ -725,40 +725,55 @@ class PuduApp {
   openPreviewModal(item) {
     if (!this.previewModal) return;
     this.previewTitle.innerText = item.filename;
-    this.previewSize.innerText = item.sizeFormatted;
+    this.previewSize.innerText = item.sizeBytes > 0 ? PuduFormats.formatBytes(item.sizeBytes) : '—';
 
-    const cat = PuduFormats.getFileCategory(item.mimeType, item.filename).category;
+    const cat = PuduFormats.getFileCategory(item.mimeType, item.filename);
+    const hasRealUrl = item.downloadUrl && item.downloadUrl !== '#' && item.downloadUrl.startsWith('http');
     let previewHtml = '';
 
-    if (cat === 'image') {
-      previewHtml = `<img src="${item.downloadUrl || 'assets/pudu_mascot.jpg'}" alt="${item.filename}" class="preview-media-img">`;
-    } else if (cat === 'pdf') {
+    if (cat.category === 'image' && hasRealUrl) {
       previewHtml = `
-        <div class="pdf-preview-box">
-          <p style="margin-bottom: 12px;">📄 Documento PDF listo para visualizar o descargar.</p>
-          <iframe src="${item.downloadUrl || ''}" class="preview-iframe"></iframe>
-        </div>
-      `;
-    } else if (cat === 'video') {
-      previewHtml = `
-        <video controls class="preview-media-video">
-          <source src="${item.downloadUrl || ''}" type="${item.mimeType}">
-          Tu navegador no soporta video.
-        </video>
-      `;
-    } else {
+        <div class="preview-media-container">
+          <img src="${item.downloadUrl}" alt="${item.filename}" class="preview-media-img"
+               onerror="this.parentElement.innerHTML='<div class=\'generic-preview-box\'><span style=\'font-size:64px\'>🖼️</span><p>No se pudo cargar la imagen. Descárgala para verla.</p></div>'">
+        </div>`;
+    } else if (cat.category === 'image') {
       previewHtml = `
         <div class="generic-preview-box">
-          <span style="font-size: 48px;">${PuduFormats.getFileCategory(item.mimeType, item.filename).icon}</span>
+          <span style="font-size: 64px;">🖼️</span>
           <h3>${item.filename}</h3>
-          <p><strong>De:</strong> ${item.sender}</p>
-          <p><strong>Asunto:</strong> ${item.subject}</p>
-          <p><strong>Tamaño:</strong> ${item.sizeFormatted}</p>
-          <button class="btn-main" onclick="window.app.downloadSingle(window.app.attachments.find(a=>a.id==='${item.id}'))" style="margin-top: 16px;">
-            ⬇️ Descargar Archivo
-          </button>
-        </div>
-      `;
+          <p>Para previsualizar imágenes, abre el correo en Gmail primero.</p>
+          <p class="preview-tip">💡 Haz clic en el adjunto dentro de Gmail para verlo directamente.</p>
+        </div>`;
+    } else if (cat.category === 'pdf' && hasRealUrl) {
+      previewHtml = `
+        <div class="pdf-preview-box">
+          <p style="margin-bottom: 12px;">📄 Documento PDF</p>
+          <iframe src="${item.downloadUrl}" class="preview-iframe"></iframe>
+        </div>`;
+    } else if (cat.category === 'video' && hasRealUrl) {
+      previewHtml = `
+        <div class="preview-media-container">
+          <video controls class="preview-media-video">
+            <source src="${item.downloadUrl}" type="${item.mimeType}">
+            Tu navegador no soporta video.
+          </video>
+        </div>`;
+    } else {
+      // Generic preview with file details
+      previewHtml = `
+        <div class="generic-preview-box">
+          <span style="font-size: 64px;">${cat.icon}</span>
+          <h3>${item.filename}</h3>
+          <div class="preview-details">
+            <div class="preview-detail-row"><strong>Tipo:</strong> <span style="color: ${cat.color}">${cat.label}</span></div>
+            <div class="preview-detail-row"><strong>Tamaño:</strong> ${item.sizeBytes > 0 ? PuduFormats.formatBytes(item.sizeBytes) + (item.sizeEstimated ? ' (estimado)' : '') : 'Desconocido'}</div>
+            <div class="preview-detail-row"><strong>De:</strong> ${item.sender}</div>
+            <div class="preview-detail-row"><strong>Asunto:</strong> ${item.subject}</div>
+            <div class="preview-detail-row"><strong>Fecha:</strong> ${PuduFormats.formatDate(item.date)}</div>
+          </div>
+          ${hasRealUrl ? `<a href="${item.downloadUrl}" download="${item.filename}" class="btn-main" style="margin-top:16px;display:inline-block;text-decoration:none;">⬇️ Descargar Archivo</a>` : '<p class="preview-tip">💡 Para descargar, abre el correo en Gmail y haz clic en el adjunto.</p>'}
+        </div>`;
     }
 
     this.previewContent.innerHTML = previewHtml;
@@ -801,14 +816,13 @@ class PuduApp {
     try {
       const stored = localStorage.getItem('pudumail2_cached_attachments');
       if (stored) {
-        this.attachments = JSON.parse(stored);
-        this.applyFiltersAndRender();
-      } else {
-        this.loadSampleData();
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.length > 0) {
+          this.attachments = parsed;
+          this.applyFiltersAndRender();
+        }
       }
-    } catch (e) {
-      this.loadSampleData();
-    }
+    } catch (e) {}
   }
 }
 

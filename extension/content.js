@@ -75,6 +75,30 @@ function dedupKey(filename, sender) {
   return `${(filename || '').toLowerCase().trim()}|${(sender || '').toLowerCase().trim()}`;
 }
 
+// Estimate realistic file sizes by extension when Gmail DOM doesn't show them
+function estimateSizeByExtension(filename) {
+  const ext = getExtension(filename);
+  const estimates = {
+    // Videos — typically large
+    mp4: 45*1048576, mov: 60*1048576, avi: 80*1048576, mkv: 55*1048576, webm: 30*1048576,
+    // Images — medium
+    jpg: 2.2*1048576, jpeg: 2.2*1048576, png: 3.5*1048576, gif: 1.8*1048576, webp: 1.2*1048576,
+    svg: 120*1024, bmp: 5*1048576, heic: 2.8*1048576,
+    // Archives — large
+    zip: 25*1048576, rar: 30*1048576, '7z': 20*1048576, gz: 15*1048576, tar: 40*1048576,
+    // Documents
+    pdf: 3.8*1048576, doc: 1.5*1048576, docx: 2*1048576,
+    xls: 2.5*1048576, xlsx: 3*1048576, ppt: 8*1048576, pptx: 10*1048576,
+    csv: 800*1024, txt: 50*1024, rtf: 500*1024,
+    // Audio
+    mp3: 5*1048576, wav: 30*1048576, ogg: 4*1048576, flac: 25*1048576, aac: 4*1048576,
+    // Other
+    eml: 500*1024, html: 200*1024, json: 100*1024, xml: 150*1024,
+    apk: 50*1048576, exe: 30*1048576, dmg: 100*1048576, iso: 700*1048576
+  };
+  return Math.round(estimates[ext] || 1*1048576);
+}
+
 // ── Strategy 1: Opened-email attachment cards ────────────────────────
 // When a user opens an email, Gmail renders attachment "cards" (thumbnails).
 // These are the richest source of data: they contain download_url, filename,
@@ -280,12 +304,14 @@ function extractFromListView() {
         .trim();
 
       if (isLikelyFilename(cleaned)) {
+        const estSize = estimateSizeByExtension(cleaned);
         found.push({
           filename: cleaned,
           mimeType: guessMimeType(cleaned),
           downloadUrl: '#', // No direct URL in list view
-          sizeBytes: 0,
-          sizeFormatted: '—',
+          sizeBytes: estSize,
+          sizeFormatted: '~' + formatBytes(estSize),
+          sizeEstimated: true,
           sender: sender || 'Gmail',
           subject: subject || 'Correo',
           date: date || new Date().toISOString()
@@ -302,12 +328,14 @@ function extractFromListView() {
         // Check we haven't already found this
         const existsAlready = found.some(f => f.filename.toLowerCase() === text.toLowerCase() && f.sender === (sender || 'Gmail'));
         if (!existsAlready) {
+          const estSize = estimateSizeByExtension(text);
           found.push({
             filename: text,
             mimeType: guessMimeType(text),
             downloadUrl: '#',
-            sizeBytes: 0,
-            sizeFormatted: '—',
+            sizeBytes: estSize,
+            sizeFormatted: '~' + formatBytes(estSize),
+            sizeEstimated: true,
             sender: sender || 'Gmail',
             subject: subject || 'Correo',
             date: date || new Date().toISOString()
@@ -352,12 +380,14 @@ function extractGenericDeepScan() {
         const nearLink = el.querySelector('a[href]');
         if (nearLink && nearLink.href.includes('mail.google.com')) url = nearLink.href;
 
+        const estSize = estimateSizeByExtension(cleaned);
         found.push({
           filename: cleaned,
           mimeType: guessMimeType(cleaned),
           downloadUrl: url,
-          sizeBytes: 0,
-          sizeFormatted: '—',
+          sizeBytes: estSize,
+          sizeFormatted: '~' + formatBytes(estSize),
+          sizeEstimated: true,
           sender: 'Gmail',
           subject: 'Correo',
           date: new Date().toISOString()
