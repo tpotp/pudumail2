@@ -186,34 +186,33 @@ class PuduApp {
   }
 
   async handleScanGmail() {
+    console.log('%c[Pudú App] 🚀 Botón Explorar Gmail clickeado', 'color: #38bdf8; font-weight: bold;');
     this.showLoading(true, 'Conectando con Gmail mediante el Conector...');
-    const result = await window.PuduBridge.scanGmail('has:attachment');
+    
+    try {
+      const result = await window.PuduBridge.scanGmail('has:attachment');
+      console.log('%c[Pudú App] Resultado del escaneo:', 'color: #10b981;', result);
 
-    if (result.success && result.attachments && result.attachments.length > 0) {
-      this.attachments = result.attachments;
-      this.saveCachedData();
-      this.applyFiltersAndRender();
-      this.showLoading(false);
-    } else if (result.needsExtension) {
-      this.showLoading(false);
-      this.openExtensionModal();
-    } else {
-      // Fallback with realistic demonstration items
+      if (result.success && result.attachments && result.attachments.length > 0) {
+        this.attachments = result.attachments;
+        this.saveCachedData();
+        this.applyFiltersAndRender();
+      } else if (result.needsExtension) {
+        this.openExtensionModal();
+      } else {
+        console.log('%c[Pudú App] Cargando datos iniciales...', 'color: #f59e0b;');
+        this.loadSampleData();
+      }
+    } catch (err) {
+      console.error('[Pudú App] Error en handleScanGmail:', err);
       this.loadSampleData();
+    } finally {
       this.showLoading(false);
     }
   }
 
-  openExtensionModal() {
-    if (this.extensionModal) this.extensionModal.classList.remove('hidden');
-  }
-
-  closeExtensionModal() {
-    if (this.extensionModal) this.extensionModal.classList.add('hidden');
-  }
-
-  loadSampleData() {
-    this.attachments = [
+  getSampleData() {
+    return [
       {
         id: 'sample_1',
         filename: 'Memoria_Anual_2025_Final.pdf',
@@ -270,7 +269,18 @@ class PuduApp {
         downloadUrl: 'assets/pudu_mascot.jpg'
       }
     ];
+  }
 
+  openExtensionModal() {
+    if (this.extensionModal) this.extensionModal.classList.remove('hidden');
+  }
+
+  closeExtensionModal() {
+    if (this.extensionModal) this.extensionModal.classList.add('hidden');
+  }
+
+  loadSampleData() {
+    this.attachments = this.getSampleData();
     this.saveCachedData();
     this.applyFiltersAndRender();
   }
