@@ -1,6 +1,6 @@
 (() => {
-if (globalThis.__puduGmailContentVersion === '2.6.0') return;
-globalThis.__puduGmailContentVersion = '2.6.0';
+if (globalThis.__puduGmailContentVersion === '2.7.1') return;
+globalThis.__puduGmailContentVersion = '2.7.1';
 
 /**
  * PUDÚ MAIL 2 — GMAIL CONTENT SCRIPT (v6 — Authentic Binary Attachment Downloader)
@@ -459,50 +459,84 @@ function fullScan() {
 async function resolveAttachment(item) {
   if (!item?.filename) throw new Error('Identificador de adjunto inválido.');
 
-  // 1. Si ya tiene URL verificada con disp=attd
+  console.log(`[Pudú v7] 🔍 Resolviendo: ${item.filename} | thread: ${item.threadId} | url: ${item.downloadUrl?.substring(0,80)}`);
+
+  // 1. Ya tiene URL con disp=attd — úsala
   if (item.downloadUrl && item.downloadUrl !== '#' && item.downloadUrl.startsWith('http') && item.downloadUrl.includes('disp=attd')) {
-    return { ...item, downloadUrl: item.downloadUrl };
+    console.log(`[Pudú v7] ✅ URL directa disponible`);
+    return { ...item };
   }
 
-  // 2. Si ya está en cache con URL real
+  // 2. En cache con URL real
   const cached = attachmentCache.get(dedupKey(item.filename, item.threadId));
-  if (cached && cached.downloadUrl && cached.downloadUrl !== '#' && cached.downloadUrl.includes('disp=attd')) {
+  if (cached?.downloadUrl && cached.downloadUrl !== '#' && cached.downloadUrl.startsWith('http')) {
+    console.log(`[Pudú v7] ✅ URL desde cache`);
     return { ...item, downloadUrl: cached.downloadUrl, sizeBytes: cached.sizeBytes, sizeFormatted: cached.sizeFormatted };
   }
 
-  // 3. Abrir la conversación real en Gmail para obtener el enlace binario auténtico
+  // 3. Abrir la conversación y extraer URLs reales del DOM
   const threadId = item.threadId || item.threadUrl?.match(/#.*\/(?:[a-zA-Z0-9_-]+\/)?([a-f0-9]{16})/i)?.[1];
-  if (!threadId) throw new Error(`No se encontró la conversación de ${item.filename}.`);
+  if (!threadId) throw new Error(`No hay threadId para "${item.filename}". Imposible abrir conversación.`);
 
   const targetHash = `#all/${threadId}`;
-  if (window.location.hash !== targetHash) {
+  if (!window.location.hash.includes(threadId)) {
     window.location.hash = targetHash;
+    await sleep(1000);
   }
 
-  for (let attempt = 0; attempt < 30; attempt++) {
-    await sleep(200);
-    const opened = scanOpenedEmail();
-    if (opened.length > 0) {
-      mergeIntoCache(opened);
-      const targetName = item.filename.toLowerCase().trim();
-      const match = opened.find(a => a.filename.toLowerCase().trim() === targetName) ||
-                    opened.find(a => a.filename.toLowerCase().includes(targetName) || targetName.includes(a.filename.toLowerCase())) ||
-                    opened[0];
-      
-      if (match && match.downloadUrl && match.downloadUrl !== '#' && match.downloadUrl.startsWith('http')) {
-        return {
-          ...item,
-          filename: match.filename || item.filename,
-          downloadUrl: match.downloadUrl,
-          sizeBytes: match.sizeBytes || item.sizeBytes,
-          sizeFormatted: match.sizeFormatted || item.sizeFormatted,
-          sizeEstimated: false
-        };
+  for (let attempt = 0; attempt < 40; attempt++) {
+    await sleep(250);
+
+    // Buscar en elementos [download_url] del DOM
+    const downloadEls = Array.from(document.querySelectorAll('[download_url]'));
+    for (const el of downloadEls) {
+      const raw = el.getAttribute('download_url') || '';
+      const parsed = parseDownloadUrlAttr(raw);
+      if (!parsed?.filename || !parsed.url) continue;
+      if (parsed.filename.toLowerCase().trim() === item.filename.toLowerCase().trim()) {
+        console.log(`[Pudú v7] ✅ Match exacto en DOM (intento ${attempt+1}): ${parsed.url.substring(0,80)}`);
+        return { ...item, downloadUrl: parsed.url };
+      }
+    }
+
+    // Buscar en links <a href*="view=att">
+    const linkEls = Array.from(document.querySelectorAll('a[href*="view=att"], a[href*="disp=attd"]'));
+    for (const el of linkEls) {
+      const title = el.getAttribute('title') || el.getAttribute('download') || el.closest('[title]')?.getAttribute('title') || '';
+      if (title.toLowerCase().includes(item.filename.toLowerCase().split('.')[0])) {
+        const url = normalizeGmailDownloadUrl(el.href || '');
+        if (url && url.startsWith('http')) {
+          console.log(`[Pudú v7] ✅ Link match (intento ${attempt+1}): ${url.substring(0,80)}`);
+          return { ...item, downloadUrl: url };
+        }
+      }
+    }
+
+    // Re-escanear y revisar cache cada ~5s
+    if (attempt % 20 === 19) {
+      console.log(`[Pudú v7] 🔄 Re-scan (intento ${attempt+1}), DOM: ${downloadEls.length} els`);
+      fullScan();
+      const recached = attachmentCache.get(dedupKey(item.filename, item.threadId));
+      if (recached?.downloadUrl && recached.downloadUrl !== '#' && recached.downloadUrl.startsWith('http')) {
+        return { ...item, downloadUrl: recached.downloadUrl };
+      }
+      // Re-navegar si el hash cambió
+      if (!window.location.hash.includes(threadId)) {
+        window.location.hash = targetHash;
       }
     }
   }
 
-  throw new Error(`Gmail no entregó el archivo binario para ${item.filename}.`);
+  // 4. Fallback: normalizar la URL original si existe
+  if (item.downloadUrl && item.downloadUrl !== '#' && item.downloadUrl.startsWith('http')) {
+    const normalized = normalizeGmailDownloadUrl(item.downloadUrl);
+    if (normalized) {
+      console.warn(`[Pudú v7] ⚠️ Usando URL original normalizada como fallback: ${normalized.substring(0,80)}`);
+      return { ...item, downloadUrl: normalized };
+    }
+  }
+
+  throw new Error(`Gmail no entregó URL de descarga para "${item.filename}" (threadId: ${threadId}).`);
 }
 
 // ── Localización de Acciones de Toolbar (Universal e Internacional) ───
@@ -753,7 +787,7 @@ async function scrollAndPaginate(query = 'has:attachment', maxPages = 50) {
 // ── Listener de mensajes ─────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'GMAIL_READY') {
-    sendResponse({ success: true, version: '2.6.0', count: attachmentCache.size });
+    sendResponse({ success: true, version: '2.7.0', count: attachmentCache.size });
     return false;
   }
 
@@ -789,7 +823,50 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
+
+  if (request.action === 'RESCUE_DOWNLOAD_URL') {
+    rescueDownloadUrl(request.item)
+      .then(result => sendResponse({ success: true, ...result }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
 });
+
+async function rescueDownloadUrl(item) {
+  const url = item.downloadUrl;
+  if (!url || url === '#' || !url.startsWith('http')) return { url };
+  
+  try {
+    const res = await fetch(url);
+    const text = await res.text();
+    
+    // Si contiene elementos típicos de las páginas de advertencia de Google
+    if (text.includes('confirm=') || text.includes('uc-download-link') || text.includes('Descargar de todos modos')) {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(text, 'text/html');
+      
+      const confirmLink = doc.querySelector('#uc-download-link, a[href*="&confirm="]');
+      if (confirmLink && confirmLink.href) {
+        let finalUrl = confirmLink.getAttribute('href');
+        if (finalUrl.startsWith('/')) finalUrl = new URL(finalUrl, url).href;
+        console.log('[Pudú Content] 🚑 URL rescatada desde advertencia:', finalUrl);
+        return { url: finalUrl };
+      }
+      
+      const form = doc.querySelector('form');
+      if (form && form.action) {
+        let action = form.getAttribute('action');
+        if (action.startsWith('/')) action = new URL(action, url).href;
+        console.log('[Pudú Content] 🚑 URL rescatada desde form:', action);
+        return { url: action };
+      }
+    }
+  } catch (err) {
+    console.warn('[Pudú Content] Error en rescate de URL:', err);
+  }
+  
+  return { url };
+}
 
 // ── Observer para escaneo continuo en background ─────────────────────
 function startObserver() {

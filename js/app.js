@@ -589,7 +589,11 @@ class PuduApp {
       const cleanupItems = result.cleanupItems || [];
 
       if (!result.downloaded) {
-        alert('No se pudo descargar ningún archivo. Gmail no se modificó.');
+        const errDetail = result.errors?.length
+          ? result.errors.join('\n')
+          : 'Sin detalles de error.';
+        alert(`No se pudo descargar ningún archivo.\n\nDetalle:\n${errDetail}`);
+        console.error('[Pudú] Download errors:', result.errors);
         return;
       }
 

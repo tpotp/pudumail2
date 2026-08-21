@@ -1,5 +1,5 @@
 /* Gmail stays in a private worker tab; no mail data leaves this browser. */
-const EXTENSION_VERSION = '2.6.0';
+const EXTENSION_VERSION = '2.7.0';
 const GMAIL_SEARCH_URL = 'https://mail.google.com/mail/u/0/#search/has%3Aattachment';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 let dashboardTabId = null;
@@ -132,18 +132,37 @@ async function resolveAttachment(item) {
   return { attachment: { ...item, ...result, downloadUrl: result.downloadUrl } };
 }
 
-async function downloadAttachment(item) {
+async function downloadAttachment(item, attempt = 1) {
   const { attachment } = await resolveAttachment(item);
+  let downloadUrl = attachment.downloadUrl;
   const cleanName = safeFilename(attachment.filename || item.filename);
   
   const downloadId = await chrome.downloads.download({
-    url: attachment.downloadUrl,
+    url: downloadUrl,
     filename: `PuduMail_Adjuntos/${cleanName}`,
     saveAs: false,
     conflictAction: 'uniquify'
   });
-  const verification = await waitForDownload(downloadId, cleanName);
-  return { downloadId, attachment, verification };
+
+  try {
+    const verification = await waitForDownload(downloadId, cleanName);
+    return { downloadId, attachment, verification };
+  } catch (error) {
+    if (error.isHtmlWarning && attempt === 1) {
+      console.log(`[Pudú BG] Detectado HTML en lugar de binario. Iniciando rescate para: ${cleanName}`);
+      // Remover la descarga fallida HTML (no pasa nada si falla)
+      chrome.downloads.removeFile(downloadId).catch(() => {});
+      
+      // Pedir a content.js la URL saltando el aviso de antivirus/redirección
+      const rescueResult = await askGmail('RESCUE_DOWNLOAD_URL', { item: attachment });
+      if (rescueResult && rescueResult.url && rescueResult.url !== downloadUrl) {
+        attachment.downloadUrl = rescueResult.url;
+        console.log(`[Pudú BG] URL rescatada. Reintentando descarga...`);
+        return downloadAttachment(attachment, 2);
+      }
+    }
+    throw error;
+  }
 }
 
 async function downloadBatch(items = []) {
@@ -210,7 +229,9 @@ function waitForDownload(downloadId, expectedFilename) {
         const expectsHtml = String(expectedFilename || '').toLowerCase().endsWith('.html') || String(expectedFilename || '').toLowerCase().endsWith('.htm');
         
         if (isHtml && !expectsHtml) {
-          finish(new Error('El archivo no estaba disponible en Gmail (servidor devolvió página de error).'));
+          const err = new Error('El servidor devolvió un HTML (posible página de advertencia de Gmail).');
+          err.isHtmlWarning = true;
+          finish(err);
           return;
         }
 
